@@ -1,4 +1,4 @@
-﻿package emohce.presentation.toolwindow.panel.render
+package emohce.presentation.toolwindow.panel.render
 
 import com.intellij.icons.AllIcons
 import emohce.domain.model.BookmarkNode
@@ -8,8 +8,8 @@ object NodeIcons {
     val bookmark: Icon = AllIcons.Nodes.Bookmark
     val group: Icon = AllIcons.Nodes.Folder
     val process: Icon = AllIcons.Actions.Execute
-    val note: Icon = AllIcons.Actions.Comment
-    val reference: Icon = AllIcons.Nodes.Link
+    val note: Icon = AllIcons.Actions.Edit
+    val reference: Icon = AllIcons.Actions.Find
 
     fun iconFor(node: BookmarkNode, isReferencedTarget: Boolean): Icon {
         return when (node) {

@@ -1,8 +1,8 @@
 package emohce.presentation.editor.inlay
 
+import com.intellij.codeInsight.hints.ChangeListener
 import com.intellij.codeInsight.hints.FactoryInlayHintsCollector
 import com.intellij.codeInsight.hints.ImmediateConfigurable
-import com.intellij.codeInsight.hints.ImmediateConfigurable.ChangeListener
 import com.intellij.codeInsight.hints.InlayHintsCollector
 import com.intellij.codeInsight.hints.InlayHintsProvider
 import com.intellij.codeInsight.hints.InlayHintsSink
@@ -35,9 +35,9 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
 
     override fun createConfigurable(settings: LineEndSettings): ImmediateConfigurable {
         return object : ImmediateConfigurable {
-            override val mainCheckboxText: String? = null
+            override val mainCheckboxText: String = "Enable line end hints"
 
-            override fun createComponent(listener: ChangeListener): JComponent? {
+            override fun createComponent(listener: ChangeListener): JComponent {
                 val enabled = JCheckBox("Enable line end hints", settings.enabled)
                 val onlyCurrentLine = JCheckBox("Only current caret line", settings.onlyCurrentLine)
                 val showBookmarks = JCheckBox("Show bookmarks", settings.showBookmarks)

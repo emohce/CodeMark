@@ -62,7 +62,6 @@ import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
-import kotlin.collections.toList
 
 class BookmarkPanel(
     private val project: Project,
@@ -81,6 +80,18 @@ class BookmarkPanel(
     private var currentState: BookmarkViewState = BookmarkViewState()
     private var lastSelectedBeforeSearch: String? = null
     private var pendingSelectionAfterClear: String? = null
+
+    private fun showPanelOkCancel(panel: JComponent, title: String): Boolean {
+        val dialog = object : DialogWrapper(project) {
+            init {
+                this.title = title
+                init()
+            }
+
+            override fun createCenterPanel(): JComponent = panel
+        }
+        return dialog.showAndGet()
+    }
 
     init {
         tree.isRootVisible = true
@@ -400,7 +411,7 @@ class BookmarkPanel(
 
     private fun selectNodeAt(event: MouseEvent) {
         val row = tree.getClosestRowForLocation(event.x, event.y)
-        if (row >= 0) tree.selectionRow = row
+        if (row >= 0) tree.setSelectionRow(row)
     }
 
     private fun startSearch() {
@@ -523,11 +534,11 @@ class BookmarkPanel(
     ): Boolean {
         if (nodeKey(current) != nodeKey(updated)) return false
 
-        val existingChildren = current.children().toList().filterIsInstance<DefaultMutableTreeNode>()
+        val existingChildren = nodeChildren(current)
         val existingMap = existingChildren.associateBy { nodeKey(it) }.toMutableMap()
         val desiredKeys = mutableListOf<String>()
 
-        val updatedChildren = updated.children().toList().filterIsInstance<DefaultMutableTreeNode>()
+        val updatedChildren = nodeChildren(updated)
         updatedChildren.forEachIndexed { index, updatedChild ->
             val key = nodeKey(updatedChild)
             desiredKeys.add(key)
@@ -560,11 +571,23 @@ class BookmarkPanel(
 
     private fun copyNode(source: DefaultMutableTreeNode): DefaultMutableTreeNode {
         val copy = DefaultMutableTreeNode(source.userObject)
-        val children = source.children().toList().filterIsInstance<DefaultMutableTreeNode>()
+        val children = nodeChildren(source)
         children.forEach { child ->
             copy.add(copyNode(child))
         }
         return copy
+    }
+
+    private fun nodeChildren(node: DefaultMutableTreeNode): List<DefaultMutableTreeNode> {
+        val result = mutableListOf<DefaultMutableTreeNode>()
+        val children = node.children()
+        while (children.hasMoreElements()) {
+            val child = children.nextElement()
+            if (child is DefaultMutableTreeNode) {
+                result.add(child)
+            }
+        }
+        return result
     }
 
     private fun moveTreeNode(nodeId: String, parentId: String, index: Int) {
@@ -663,8 +686,7 @@ class BookmarkPanel(
             .addLabeledComponent("Column", columnField)
             .panel
 
-        val result = Messages.showOkCancelDialog(project, panel, "Edit Bookmark", "OK", "Cancel", null)
-        if (result != Messages.OK) return null
+        if (!showPanelOkCancel(panel, "Edit Bookmark")) return null
         val path = pathField.text.trim()
         if (!ensureFileExists(path, "Edit Bookmark")) return null
         val line = (lineField.text.trim().toIntOrNull() ?: node.line).coerceAtLeast(0)
@@ -688,8 +710,7 @@ class BookmarkPanel(
             .addLabeledComponent("Markdown", JScrollPane(markdownField))
             .panel
 
-        val result = Messages.showOkCancelDialog(project, panel, "Edit Description", "OK", "Cancel", null)
-        if (result != Messages.OK) return null
+        if (!showPanelOkCancel(panel, "Edit Description")) return null
         return node.copy(
             name = nameField.text.trim(),
             description = descField.text.trim(),
@@ -705,8 +726,7 @@ class BookmarkPanel(
             .addLabeledComponent("Description", descField)
             .panel
 
-        val result = Messages.showOkCancelDialog(project, panel, "Edit Group", "OK", "Cancel", null)
-        if (result != Messages.OK) return null
+        if (!showPanelOkCancel(panel, "Edit Group")) return null
         return node.copy(name = nameField.text.trim(), description = descField.text.trim())
     }
 
@@ -722,8 +742,7 @@ class BookmarkPanel(
             .addLabeledComponent("Entry line", entryLineField)
             .panel
 
-        val result = Messages.showOkCancelDialog(project, panel, "Edit Process", "OK", "Cancel", null)
-        if (result != Messages.OK) return null
+        if (!showPanelOkCancel(panel, "Edit Process")) return null
         val entryPath = entryPathField.text.trim().ifBlank { null }
         if (!entryPath.isNullOrBlank() && !ensureFileExists(entryPath, "Edit Process")) return null
         val entryLine = entryLineField.text.trim().toIntOrNull()
@@ -771,8 +790,8 @@ class BookmarkPanel(
         if (containers.isEmpty()) return
 
         val labels = containers.map { it.label }.toTypedArray()
-        val choice = Messages.showChooseDialog(project, "Move to:", "Move", null, labels, labels.first()) ?: return
-        val target = containers.firstOrNull { it.label == choice } ?: return
+        val choiceIndex = chooseIndex("Move to:", "Move", labels)
+        val target = containers.getOrNull(choiceIndex) ?: return
         viewModel.processIntent(BookmarkIntent.MoveNode(node.uuid, target.id, -1))
     }
 
@@ -782,15 +801,8 @@ class BookmarkPanel(
         val bookmarks = collectBookmarks(root).filter { it.uuid != source.uuid }
         if (bookmarks.isEmpty()) return
         val labels = bookmarks.map { formatBookmarkLabel(it) }.toTypedArray()
-        val choice = Messages.showChooseDialog(
-            project,
-            "Select target bookmark:",
-            "Create Reference",
-            null,
-            labels,
-            labels.first()
-        ) ?: return
-        val target = bookmarks.firstOrNull { formatBookmarkLabel(it) == choice } ?: return
+        val choiceIndex = chooseIndex("Select target bookmark:", "Create Reference", labels)
+        val target = bookmarks.getOrNull(choiceIndex) ?: return
         viewModel.processIntent(BookmarkIntent.CreateReference(source.uuid, target.uuid))
     }
 
@@ -828,7 +840,7 @@ class BookmarkPanel(
             }
         }
         if (!dialog.showAndGet()) return
-        val selected = list.selectedIndices.mapNotNull { index -> entries.getOrNull(index) }
+        val selected = list.selectedIndices.toList().mapNotNull { index -> entries.getOrNull(index) }
         if (selected.isEmpty()) return
         selected.forEach { entry ->
             selectNodeById(entry.target.uuid)
@@ -1067,15 +1079,8 @@ class BookmarkPanel(
         val processes = collectProcesses(root).filter { it.uuid !in blockedTargets }
         if (processes.isEmpty()) return
         val labels = processes.map { it.name.ifBlank { "(unnamed)" } }.toTypedArray()
-        val choice = Messages.showChooseDialog(
-            project,
-            "Select process:",
-            "Copy To Process",
-            null,
-            labels,
-            labels.first()
-        ) ?: return
-        val target = processes.firstOrNull { it.name.ifBlank { "(unnamed)" } == choice } ?: return
+        val choiceIndex = chooseIndex("Select process:", "Copy To Process", labels)
+        val target = processes.getOrNull(choiceIndex) ?: return
         nodes.forEach { node ->
             val clone = cloneForInsert(node)
             when (clone) {
@@ -1100,33 +1105,15 @@ class BookmarkPanel(
         }
         if (processes.isEmpty()) return
         val labels = processes.map { it.name.ifBlank { "(unnamed)" } }.toTypedArray()
-        val choice = Messages.showChooseDialog(
-            project,
-            "Select process:",
-            "Add Step",
-            null,
-            labels,
-            labels.first()
-        ) ?: return
-        val target = processes.firstOrNull { it.name.ifBlank { "(unnamed)" } == choice } ?: return
+        val choiceIndex = chooseIndex("Select process:", "Add Step", labels)
+        val target = processes.getOrNull(choiceIndex) ?: return
         val steps = target.steps
         val positionOptions = mutableListOf("Append")
         steps.forEachIndexed { index, step ->
             positionOptions.add("Before ${index + 1}: ${step.name.ifBlank { "(unnamed)" }}")
         }
-        val positionChoice = Messages.showChooseDialog(
-            project,
-            "Insert position:",
-            "Add Step",
-            null,
-            positionOptions.toTypedArray(),
-            positionOptions.first()
-        ) ?: return
-        val baseIndex = if (positionChoice == "Append") {
-            -1
-        } else {
-            positionOptions.indexOf(positionChoice) - 1
-        }
+        val positionChoice = chooseIndex("Insert position:", "Add Step", positionOptions.toTypedArray())
+        val baseIndex = if (positionChoice == 0) -1 else positionChoice - 1
         var insertIndex = baseIndex
         nodes.forEach { node ->
             val index = if (insertIndex < 0) -1 else insertIndex++
@@ -1169,15 +1156,8 @@ class BookmarkPanel(
         val processes = collectProcesses(root).filter { it.uuid != node.uuid }
         if (processes.isEmpty()) return
         val labels = processes.map { it.name.ifBlank { "(unnamed)" } }.toTypedArray()
-        val choice = Messages.showChooseDialog(
-            project,
-            "Select process:",
-            "Add To Process",
-            null,
-            labels,
-            labels.first()
-        ) ?: return
-        val target = processes.firstOrNull { it.name.ifBlank { "(unnamed)" } == choice } ?: return
+        val choiceIndex = chooseIndex("Select process:", "Add To Process", labels)
+        val target = processes.getOrNull(choiceIndex) ?: return
         viewModel.processIntent(BookmarkIntent.MoveNode(node.uuid, target.uuid, -1))
     }
 
@@ -1205,15 +1185,8 @@ class BookmarkPanel(
         val sources = collectReferenceSources(target.uuid)
         if (sources.isEmpty()) return
         val labels = sources.map { formatBookmarkLabel(it) }.toTypedArray()
-        val choice = Messages.showChooseDialog(
-            project,
-            "Select reference source:",
-            "Reference Source",
-            null,
-            labels,
-            labels.first()
-        ) ?: return
-        val source = sources.firstOrNull { formatBookmarkLabel(it) == choice } ?: return
+        val choiceIndex = chooseIndex("Select reference source:", "Reference Source", labels)
+        val source = sources.getOrNull(choiceIndex) ?: return
         selectNodeById(source.uuid)
     }
 
@@ -1223,16 +1196,13 @@ class BookmarkPanel(
         val targets = collectReferenceTargets(source.uuid)
         if (targets.isEmpty()) return
         val labels = targets.map { formatBookmarkLabel(it) }.toTypedArray()
-        val choice = Messages.showChooseDialog(
-            project,
-            "Select reference target:",
-            "Reference Targets",
-            null,
-            labels,
-            labels.first()
-        ) ?: return
-        val target = targets.firstOrNull { formatBookmarkLabel(it) == choice } ?: return
+        val choiceIndex = chooseIndex("Select reference target:", "Reference Targets", labels)
+        val target = targets.getOrNull(choiceIndex) ?: return
         selectNodeById(target.uuid)
+    }
+
+    private fun chooseIndex(message: String, title: String, options: Array<String>): Int {
+        return Messages.showDialog(project, message, title, options, 0, null)
     }
 
     private fun collectReferenceSources(targetId: String): List<BookmarkNode.Bookmark> {

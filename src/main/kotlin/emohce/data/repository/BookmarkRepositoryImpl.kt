@@ -56,7 +56,7 @@ class BookmarkRepositoryImpl(private val store: BookmarkStore) : BookmarkReposit
 
     override suspend fun update(node: BookmarkNode) {
         val previous = findByUuidInternal(store.root, node.uuid)
-        val root = replaceNode(store.root, node)
+        val root = replaceNode(store.root, node) as BookmarkNode.Group
         store.replaceRoot(root)
         changes.tryEmit(BookmarkEvent.NodeUpdated(node, previous))
         notifyObserved(node.uuid)
@@ -80,7 +80,7 @@ class BookmarkRepositoryImpl(private val store: BookmarkStore) : BookmarkReposit
     }
 
     override suspend fun reorder(parentId: String, orderedChildIds: List<String>) {
-        val root = reorderChildren(store.root, parentId, orderedChildIds)
+        val root = reorderChildren(store.root, parentId, orderedChildIds) as BookmarkNode.Group
         store.replaceRoot(root)
     }
 
