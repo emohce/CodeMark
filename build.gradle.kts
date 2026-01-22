@@ -1,11 +1,12 @@
 plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "2.1.20"
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.1.20"
     id("org.jetbrains.intellij.platform") version "2.10.2"
 }
 
-group = "com.emohce"
-version = "1.0-SNAPSHOT"
+group = "emohce"
+version = "0.0.1"
 
 repositories {
     mavenCentral()
@@ -17,19 +18,28 @@ repositories {
 // Read more: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
 dependencies {
     intellijPlatform {
-        intellijIdea("2025.2.4")
+        intellijIdea("2025.3")
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
 
 
         // Add plugin dependencies for compilation here, example:
         // bundledPlugin("com.intellij.java")
     }
+
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testImplementation("io.mockk:mockk:1.13.12")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    testImplementation("app.cash.turbine:turbine:1.1.0")
 }
 
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "252.25557"
+            sinceBuild = "253"
         }
 
         changeNotes = """
@@ -43,6 +53,10 @@ tasks {
     withType<JavaCompile> {
         sourceCompatibility = "21"
         targetCompatibility = "21"
+    }
+
+    withType<Test> {
+        useJUnitPlatform()
     }
 }
 

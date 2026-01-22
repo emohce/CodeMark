@@ -1,20 +1,19 @@
 <!-- Plugin Configuration File: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <!-- Unique identifier of the plugin. It should be FQN, cannot be changed between the plugin versions. -->
-    <id>com.emohce.CodeRemarkTour</id>
+    <id>emohce</id>
 
     <!-- Public plugin name should be written in Title Case.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name -->
     <name>CodeRemarkTour</name>
 
     <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-    <vendor url="https://www.yourcompany.com">YourCompany</vendor>
+    <vendor>emohce</vendor>
 
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-description -->
     <description><![CDATA[
-        Enter short description for your plugin here.<br>
-        <em>most HTML tags may be used</em>
+        CodeRemarkTour provides structured bookmarks and guided navigation.
     ]]></description>
 
     <!-- Product and plugin compatibility requirements.
@@ -24,5 +23,57 @@
     <!-- Extensions defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup
+            id="CodeRemarkTour"
+            displayType="BALLOON"
+            isLogByDefault="true"/>
+        <codeInsight.lineMarkerProvider
+            language="JAVA"
+            implementationClass="emohce.presentation.editor.gutter.BookmarkLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider
+            language="kotlin"
+            implementationClass="emohce.presentation.editor.gutter.BookmarkLineMarkerProvider"/>
+        <codeInsight.inlayProvider
+            language="JAVA"
+            implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
+        <codeInsight.inlayProvider
+            language="kotlin"
+            implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
+        <toolWindow
+            id="CodeRemarkTour"
+            factoryClass="emohce.presentation.toolwindow.CodeRemarkTourToolWindowFactory"
+            icon="/META-INF/pluginIcon.svg"
+            anchor="right"
+            secondary="false"/>
     </extensions>
+
+    <actions>
+        <action id="CodeRemarkTour.CreateBookmarkAtCaret"
+                class="emohce.presentation.action.CreateBookmarkAtCaretAction"
+                text="Add Bookmark Here"
+                description="Create a bookmark at the current caret">
+            <keyboard-shortcut keymap="$default" first-keystroke="shift F2"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action id="CodeRemarkTour.CreateProcessAtCaret"
+                class="emohce.presentation.action.CreateProcessAtCaretAction"
+                text="Add Process Entry Here"
+                description="Create a process with entry at the current caret">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action id="CodeRemarkTour.CreateGroupAtCaret"
+                class="emohce.presentation.action.CreateGroupAtCaretAction"
+                text="Add Group Here"
+                description="Create a group under the current selection">
+            <keyboard-shortcut keymap="$default" first-keystroke="shift F3"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action id="CodeRemarkTour.CreateNoteAtCaret"
+                class="emohce.presentation.action.CreateNoteAtCaretAction"
+                text="Add Note Here"
+                description="Create a note under the current selection">
+            <keyboard-shortcut keymap="$default" first-keystroke="shift F4"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>
