@@ -29,6 +29,7 @@
 - 2026-01-23 17:45: Build error “isEnabledByDefault overrides nothing” (API doesn’t expose that property); will remove override and rely on default enablement while keeping settings UI hidden.
 - 2026-01-23 17:49: For auto-refresh and proper insertion after add, introduced SelectionBus tracking of last selected node (by ID) to target insertion and selection after creation; pending UI wiring.
 - 2026-01-23 18:20: Wired BookmarkPanel to record last selection, compute insertionTarget (child of group/process or after selected leaf), pass insertIndex to Create* intents, and auto-select created node; unresolved reference fixed.
+- 2026-01-23 19:31: Added SelectNode side effect handling in panel to scroll/highlight, and ViewModel now emits SelectNode on NodeAdded and navigate actions; reloadBookmarks factored to suspend and called after creates. Tree should auto-refresh and highlight newly created or navigated nodes.
 
 
 [•]

@@ -247,6 +247,7 @@ class BookmarkPanel(
         }.launchIn(scope)
 
         SelectionBus.getInstance(project).requests.onEach { nodeId ->
+            viewModel.processIntent(BookmarkIntent.Refresh)
             selectNodeById(nodeId)
         }.launchIn(scope)
     }
@@ -1490,7 +1491,11 @@ class BookmarkPanel(
             is BookmarkSideEffect.NavigateToFile -> navigateToFile(effect.filePath, effect.line, effect.column)
             is BookmarkSideEffect.ShowNotification -> notify(effect.message, effect.type)
             is BookmarkSideEffect.ScrollToSelected -> Unit
-            is BookmarkSideEffect.SelectNode -> selectNodeById(effect.nodeId)
+            is BookmarkSideEffect.SelectNode -> {
+                SelectionBus.getInstance(project).setLastSelectedNodeId(effect.nodeId)
+                selectNodeById(effect.nodeId)
+                tree.selectionPath?.let { tree.scrollPathToVisible(it) }
+            }
         }
     }
 

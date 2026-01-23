@@ -77,32 +77,34 @@ class BookmarkViewModel(
     }
 
     private fun loadBookmarks() {
-        scope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
-            try {
-                val root = withContext(dispatchers.io) {
-                    bookmarkRepository.getRootNode()
-                }
-                val references = withContext(dispatchers.io) {
-                    referenceRepository.getAllReferences()
-                }
-                val counts = references.groupingBy { it.sourceId }.eachCount()
-                val targets = references.map { it.targetId }.toSet()
-                val targetsBySource = references.groupBy({ it.sourceId }, { it.targetId })
-                val sourcesByTarget = references.groupBy({ it.targetId }, { it.sourceId })
-                _state.update {
-                    it.copy(
-                        rootNode = root,
-                        isLoading = false,
-                        referenceCounts = counts,
-                        referenceTargets = targets,
-                        referenceTargetsBySource = targetsBySource,
-                        referenceSourcesByTarget = sourcesByTarget
-                    )
-                }
-            } catch (e: Exception) {
-                _state.update { it.copy(error = e.message, isLoading = false) }
+        scope.launch { reloadBookmarks() }
+    }
+
+    private suspend fun reloadBookmarks() {
+        _state.update { it.copy(isLoading = true, error = null) }
+        try {
+            val root = withContext(dispatchers.io) {
+                bookmarkRepository.getRootNode()
             }
+            val references = withContext(dispatchers.io) {
+                referenceRepository.getAllReferences()
+            }
+            val counts = references.groupingBy { it.sourceId }.eachCount()
+            val targets = references.map { it.targetId }.toSet()
+            val targetsBySource = references.groupBy({ it.sourceId }, { it.targetId })
+            val sourcesByTarget = references.groupBy({ it.targetId }, { it.sourceId })
+            _state.update {
+                it.copy(
+                    rootNode = root,
+                    isLoading = false,
+                    referenceCounts = counts,
+                    referenceTargets = targets,
+                    referenceTargetsBySource = targetsBySource,
+                    referenceSourcesByTarget = sourcesByTarget
+                )
+            }
+        } catch (e: Exception) {
+            _state.update { it.copy(error = e.message, isLoading = false) }
         }
     }
 
@@ -110,10 +112,13 @@ class BookmarkViewModel(
         scope.launch {
             bookmarkRepository.observeChanges().collect { event ->
                 when (event) {
-                    is BookmarkEvent.NodeAdded -> loadBookmarks()
-                    is BookmarkEvent.NodeUpdated -> loadBookmarks()
-                    is BookmarkEvent.NodeRemoved -> loadBookmarks()
-                    is BookmarkEvent.NodeMoved -> loadBookmarks()
+                    is BookmarkEvent.NodeAdded -> {
+                        reloadBookmarks()
+                        _sideEffects.emit(BookmarkSideEffect.SelectNode(event.node.uuid))
+                    }
+                    is BookmarkEvent.NodeUpdated -> reloadBookmarks()
+                    is BookmarkEvent.NodeRemoved -> reloadBookmarks()
+                    is BookmarkEvent.NodeMoved -> reloadBookmarks()
                     is BookmarkEvent.ReferenceSynced -> Unit
                 }
             }
@@ -126,18 +131,26 @@ class BookmarkViewModel(
 
     private suspend fun handleCreateBookmark(parentId: String?, bookmark: BookmarkNode.Bookmark, insertIndex: Int?) {
         bookmarkRepository.create(bookmark, parentId, insertIndex)
+        reloadBookmarks()
+        _sideEffects.emit(BookmarkSideEffect.SelectNode(bookmark.uuid))
     }
 
     private suspend fun handleCreateGroup(parentId: String?, group: BookmarkNode.Group, insertIndex: Int?) {
         bookmarkRepository.create(group, parentId, insertIndex)
+        reloadBookmarks()
+        _sideEffects.emit(BookmarkSideEffect.SelectNode(group.uuid))
     }
 
     private suspend fun handleCreateProcess(parentId: String?, process: BookmarkNode.Process, insertIndex: Int?) {
         bookmarkRepository.create(process, parentId, insertIndex)
+        reloadBookmarks()
+        _sideEffects.emit(BookmarkSideEffect.SelectNode(process.uuid))
     }
 
     private suspend fun handleCreateDescriptive(parentId: String?, note: BookmarkNode.DescriptiveBookmark, insertIndex: Int?) {
         bookmarkRepository.create(note, parentId, insertIndex)
+        reloadBookmarks()
+        _sideEffects.emit(BookmarkSideEffect.SelectNode(note.uuid))
     }
 
     private suspend fun handleEditNode(node: BookmarkNode) {
@@ -261,6 +274,7 @@ class BookmarkViewModel(
     private suspend fun handleNavigateToBookmark(bookmark: BookmarkNode.Bookmark) {
         _state.update { it.copy(selectedNodeId = bookmark.uuid) }
         _sideEffects.emit(BookmarkSideEffect.NavigateToFile(bookmark.filePath, bookmark.line, bookmark.column))
+        _sideEffects.emit(BookmarkSideEffect.SelectNode(bookmark.uuid))
         _sideEffects.emit(BookmarkSideEffect.ScrollToSelected)
 
         val progress = processNavigationUseCase.getProgress(bookmark)
