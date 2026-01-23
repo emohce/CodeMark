@@ -7,11 +7,14 @@ import com.intellij.codeInsight.hints.InlayHintsCollector
 import com.intellij.codeInsight.hints.InlayHintsProvider
 import com.intellij.codeInsight.hints.InlayHintsSink
 import com.intellij.codeInsight.hints.SettingsKey
+import com.intellij.codeInsight.hints.presentation.InlayPresentation
+import com.intellij.codeInsight.hints.presentation.PresentationFactory
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
+import com.intellij.ui.JBColor
 import com.intellij.util.ui.FormBuilder
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
@@ -73,8 +76,6 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
         val normalizedPath = FileUtil.toSystemIndependentName(virtualFile.path)
         val document = PsiDocumentManager.getInstance(file.project).getDocument(file) ?: return null
 
-        // Resolve hints once per file to avoid recomputing for each PSI element and to keep
-        // any I/O off the EDT.
         val hints = runBlocking {
             withContext(Dispatchers.IO) {
                 val locator = ServiceLocator(file.project)
@@ -85,9 +86,13 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
         if (hints.isEmpty()) return null
 
         return object : FactoryInlayHintsCollector(editor) {
+            private var collected = false
+
             override fun collect(element: PsiElement, editor: Editor, sink: InlayHintsSink): Boolean {
                 if (element !is PsiFile) return true
-                val rendered = mutableSetOf<Pair<Int, String>>()
+                if (collected) return false
+                collected = true
+
                 val caretLine = editor.caretModel.primaryCaret.logicalPosition.line
                 val byLine = hints.groupBy { it.line }
                 byLine.forEach { (line, entries) ->
@@ -97,20 +102,21 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
                         (it.type == HintType.BOOKMARK && settings.showBookmarks) ||
                             (it.type == HintType.PROCESS && settings.showProcesses)
                     }
-                    val distinct = filtered.distinctBy { it.type to it.label }
-                    if (distinct.isEmpty()) return@forEach
+                    val count = filtered.size
+                    if (count == 0) return@forEach
                     val offset = document.getLineEndOffset(line)
-                    val label = distinct.joinToString(" | ") { it.label }
-                    if (!rendered.add(offset to label)) return@forEach
-                    val presentation = factory.smallText(" $label")
+                    val presentation = createBadgePresentation(factory, count)
                     sink.addInlineElement(offset, true, presentation, false)
-                    // Force repaint so newly added bookmarks appear without reopening editor.
-                    editor.contentComponent.revalidate()
-                    editor.contentComponent.repaint()
                 }
                 return false
             }
         }
+    }
+
+    private fun createBadgePresentation(factory: PresentationFactory, count: Int): InlayPresentation {
+        val text = factory.smallText(" $count ")
+        val withBackground = factory.roundWithBackground(text)
+        return withBackground
     }
 
     private fun collectHints(root: BookmarkNode, filePath: String): List<HintEntry> {
@@ -120,8 +126,7 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
             when (node) {
                 is BookmarkNode.Bookmark -> {
                     if (FileUtil.toSystemIndependentName(node.filePath) == normalizedTarget) {
-                        val name = node.name.ifBlank { "Bookmark" }
-                        hints.add(HintEntry(node.line, name, HintType.BOOKMARK))
+                        hints.add(HintEntry(node.line, node.uuid, HintType.BOOKMARK))
                     }
                 }
                 is BookmarkNode.Process -> {
@@ -130,14 +135,13 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
                         FileUtil.toSystemIndependentName(node.entryFilePath) == normalizedTarget &&
                         entryLine != null
                     ) {
-                        val name = node.name.ifBlank { "Process" }
-                        hints.add(HintEntry(entryLine, name, HintType.PROCESS))
+                        hints.add(HintEntry(entryLine, node.uuid, HintType.PROCESS))
                     }
                 }
                 else -> Unit
             }
         }
-        return hints.distinctBy { Triple(it.line, it.type, it.label) }
+        return hints.distinctBy { it.line to it.id }
     }
 
     private fun traverse(node: BookmarkNode, visitor: (BookmarkNode) -> Unit) {
@@ -149,7 +153,7 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
         }
     }
 
-    private data class HintEntry(val line: Int, val label: String, val type: HintType)
+    private data class HintEntry(val line: Int, val id: String, val type: HintType)
 
     private enum class HintType { BOOKMARK, PROCESS }
 }

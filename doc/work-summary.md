@@ -36,6 +36,10 @@
 - 2026-01-23 22:12: Build errors: DaemonCodeAnalyzer.restart requires non-null PsiFile; adjust RefreshInlays handling to null-check and fall back. Also remove redundant qualifier in actionPerformed parameter.
 - 2026-01-23 22:20: Duplicate hints persisted; deduped collected hints globally by (line, type, label) in provider.
 - 2026-01-23 23:14: Hints not auto-refreshing after add; plan to normalize file paths and ensure VFS refresh before Daemon restart when handling RefreshInlays.
+- 2026-01-23 23:59: Hints still duplicated after reload; plan to dedupe per-line by label (ignore type) in provider to collapse identical labels even from different node types.
+- 2026-01-24 00:04: Root cause: multiple language-specific provider registrations (JAVA, kotlin, Markdown) each created separate collectors adding hints independently. Fixed by consolidating to single language-agnostic registration (language="") and adding collected flag to prevent re-entry.
+- 2026-01-24 00:06: language="" registration caused no hints; restored multiple registrations (JAVA, kotlin, Markdown, TEXT) and added static WeakHashMap to track rendered editors, preventing duplicates across provider instances.
+- 2026-01-24 00:09: WeakHashMap blocks all renders after first pass; need to clear on each pass. Also user wants blue circle badge style (like IntelliJ's reference count badge) instead of text hints. Plan: use roundWithBackground presentation and show bookmark count per line.
 
 
 [•]
