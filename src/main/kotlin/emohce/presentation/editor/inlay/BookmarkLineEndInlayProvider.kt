@@ -87,6 +87,7 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
         return object : FactoryInlayHintsCollector(editor) {
             override fun collect(element: PsiElement, editor: Editor, sink: InlayHintsSink): Boolean {
                 if (element !is PsiFile) return true
+                val rendered = mutableSetOf<Pair<Int, String>>()
                 val caretLine = editor.caretModel.primaryCaret.logicalPosition.line
                 val byLine = hints.groupBy { it.line }
                 byLine.forEach { (line, entries) ->
@@ -96,11 +97,16 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
                         (it.type == HintType.BOOKMARK && settings.showBookmarks) ||
                             (it.type == HintType.PROCESS && settings.showProcesses)
                     }
-                    if (filtered.isEmpty()) return@forEach
+                    val distinct = filtered.distinctBy { it.type to it.label }
+                    if (distinct.isEmpty()) return@forEach
                     val offset = document.getLineEndOffset(line)
-                    val label = filtered.joinToString(" | ") { it.label }
+                    val label = distinct.joinToString(" | ") { it.label }
+                    if (!rendered.add(offset to label)) return@forEach
                     val presentation = factory.smallText(" $label")
                     sink.addInlineElement(offset, true, presentation, false)
+                    // Force repaint so newly added bookmarks appear without reopening editor.
+                    editor.contentComponent.revalidate()
+                    editor.contentComponent.repaint()
                 }
                 return false
             }
@@ -115,7 +121,7 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
                 is BookmarkNode.Bookmark -> {
                     if (FileUtil.toSystemIndependentName(node.filePath) == normalizedTarget) {
                         val name = node.name.ifBlank { "Bookmark" }
-                        hints.add(HintEntry(node.line, "[B] $name", HintType.BOOKMARK))
+                        hints.add(HintEntry(node.line, name, HintType.BOOKMARK))
                     }
                 }
                 is BookmarkNode.Process -> {
@@ -125,13 +131,13 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
                         entryLine != null
                     ) {
                         val name = node.name.ifBlank { "Process" }
-                        hints.add(HintEntry(entryLine, "[P] $name", HintType.PROCESS))
+                        hints.add(HintEntry(entryLine, name, HintType.PROCESS))
                     }
                 }
                 else -> Unit
             }
         }
-        return hints
+        return hints.distinctBy { Triple(it.line, it.type, it.label) }
     }
 
     private fun traverse(node: BookmarkNode, visitor: (BookmarkNode) -> Unit) {

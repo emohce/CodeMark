@@ -115,6 +115,12 @@ class BookmarkViewModel(
                     is BookmarkEvent.NodeAdded -> {
                         reloadBookmarks()
                         _sideEffects.emit(BookmarkSideEffect.SelectNode(event.node.uuid))
+                        val path = when (val node = event.node) {
+                            is BookmarkNode.Bookmark -> node.filePath
+                            is BookmarkNode.Process -> node.entryFilePath
+                            else -> null
+                        }
+                        path?.let { _sideEffects.emit(BookmarkSideEffect.RefreshInlays(it)) }
                     }
                     is BookmarkEvent.NodeUpdated -> reloadBookmarks()
                     is BookmarkEvent.NodeRemoved -> reloadBookmarks()
@@ -133,6 +139,7 @@ class BookmarkViewModel(
         bookmarkRepository.create(bookmark, parentId, insertIndex)
         reloadBookmarks()
         _sideEffects.emit(BookmarkSideEffect.SelectNode(bookmark.uuid))
+        _sideEffects.emit(BookmarkSideEffect.RefreshInlays(bookmark.filePath))
     }
 
     private suspend fun handleCreateGroup(parentId: String?, group: BookmarkNode.Group, insertIndex: Int?) {
@@ -145,6 +152,7 @@ class BookmarkViewModel(
         bookmarkRepository.create(process, parentId, insertIndex)
         reloadBookmarks()
         _sideEffects.emit(BookmarkSideEffect.SelectNode(process.uuid))
+        process.entryFilePath?.let { _sideEffects.emit(BookmarkSideEffect.RefreshInlays(it)) }
     }
 
     private suspend fun handleCreateDescriptive(parentId: String?, note: BookmarkNode.DescriptiveBookmark, insertIndex: Int?) {
@@ -387,4 +395,5 @@ sealed class BookmarkSideEffect {
     data class ShowNotification(val message: String, val type: NotificationType) : BookmarkSideEffect()
     data object ScrollToSelected : BookmarkSideEffect()
     data class SelectNode(val nodeId: String) : BookmarkSideEffect()
+    data class RefreshInlays(val filePath: String) : BookmarkSideEffect()
 }

@@ -2,6 +2,8 @@ package emohce.presentation.toolwindow.panel
 
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
+import com.intellij.psi.PsiManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.keymap.KeymapManager
@@ -40,6 +42,7 @@ import java.awt.geom.Path2D
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import java.awt.datatransfer.Transferable
+import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -116,13 +119,13 @@ class BookmarkPanel(
         }
         tree.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "collapse")
         tree.actionMap.put("collapse", object : AbstractAction() {
-            override fun actionPerformed(e: java.awt.event.ActionEvent) {
+            override fun actionPerformed(e: ActionEvent) {
                 tree.collapsePath(tree.selectionPath)
             }
         })
         tree.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0), "expand")
         tree.actionMap.put("expand", object : AbstractAction() {
-            override fun actionPerformed(e: java.awt.event.ActionEvent) {
+            override fun actionPerformed(e: ActionEvent) {
                 tree.expandPath(tree.selectionPath)
             }
         })
@@ -1495,6 +1498,16 @@ class BookmarkPanel(
                 SelectionBus.getInstance(project).setLastSelectedNodeId(effect.nodeId)
                 selectNodeById(effect.nodeId)
                 tree.selectionPath?.let { tree.scrollPathToVisible(it) }
+            }
+            is BookmarkSideEffect.RefreshInlays -> {
+                val file = LocalFileSystem.getInstance().findFileByPath(effect.filePath) ?: return
+                val psiFile = PsiManager.getInstance(project).findFile(file)
+                val analyzer = DaemonCodeAnalyzer.getInstance(project)
+                if (psiFile != null) {
+                    analyzer.restart(psiFile)
+                } else {
+                    analyzer.restart()
+                }
             }
         }
     }

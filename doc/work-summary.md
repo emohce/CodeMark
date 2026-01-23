@@ -30,6 +30,11 @@
 - 2026-01-23 17:49: For auto-refresh and proper insertion after add, introduced SelectionBus tracking of last selected node (by ID) to target insertion and selection after creation; pending UI wiring.
 - 2026-01-23 18:20: Wired BookmarkPanel to record last selection, compute insertionTarget (child of group/process or after selected leaf), pass insertIndex to Create* intents, and auto-select created node; unresolved reference fixed.
 - 2026-01-23 19:31: Added SelectNode side effect handling in panel to scroll/highlight, and ViewModel now emits SelectNode on NodeAdded and navigate actions; reloadBookmarks factored to suspend and called after creates. Tree should auto-refresh and highlight newly created or navigated nodes.
+- 2026-01-23 21:28: Inlay hints: removed [B]/[P] prefixes to drop icons, added Markdown/TEXT provider registrations, normalized file paths for matching, forced repaint after adding hints, and emit RefreshInlays side effect on create/node-added so new marks show without reopening editor.
+- 2026-01-23 21:54: User reported compile error in BookmarkPanel: `HintUtils` is internal; plan to switch to public InlayHints API (e.g., `InlayHintsPassFactory.forceHintsUpdateOnNextPass`) to refresh hints.
+- 2026-01-23 22:00: InlayHintsPassFactory not available in target platform; plan shifted to refresh inlay hints via DaemonCodeAnalyzer restart (per file when possible).
+- 2026-01-23 22:12: Build errors: DaemonCodeAnalyzer.restart requires non-null PsiFile; adjust RefreshInlays handling to null-check and fall back. Also remove redundant qualifier in actionPerformed parameter.
+- 2026-01-23 22:20: Duplicate hints persisted; deduped collected hints globally by (line, type, label) in provider.
 
 
 [•]
