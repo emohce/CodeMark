@@ -8,6 +8,7 @@ import com.intellij.codeInsight.hints.InlayHintsProvider
 import com.intellij.codeInsight.hints.InlayHintsSink
 import com.intellij.codeInsight.hints.SettingsKey
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.util.io.FileUtil
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
@@ -69,6 +70,7 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
     ): InlayHintsCollector? {
         if (!settings.enabled) return null
         val virtualFile = file.virtualFile ?: return null
+        val normalizedPath = FileUtil.toSystemIndependentName(virtualFile.path)
         val document = PsiDocumentManager.getInstance(file.project).getDocument(file) ?: return null
 
         // Resolve hints once per file to avoid recomputing for each PSI element and to keep
@@ -77,7 +79,7 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
             withContext(Dispatchers.IO) {
                 val locator = ServiceLocator(file.project)
                 val root = locator.bookmarkRepository.getRootNode()
-                collectHints(root, virtualFile.path)
+                collectHints(root, normalizedPath)
             }
         }
         if (hints.isEmpty()) return null
@@ -107,17 +109,21 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
 
     private fun collectHints(root: BookmarkNode, filePath: String): List<HintEntry> {
         val hints = mutableListOf<HintEntry>()
+        val normalizedTarget = FileUtil.toSystemIndependentName(filePath)
         traverse(root) { node ->
             when (node) {
                 is BookmarkNode.Bookmark -> {
-                    if (node.filePath == filePath) {
+                    if (FileUtil.toSystemIndependentName(node.filePath) == normalizedTarget) {
                         val name = node.name.ifBlank { "Bookmark" }
                         hints.add(HintEntry(node.line, "[B] $name", HintType.BOOKMARK))
                     }
                 }
                 is BookmarkNode.Process -> {
                     val entryLine = node.entryLine
-                    if (node.entryFilePath == filePath && entryLine != null) {
+                    if (node.entryFilePath != null &&
+                        FileUtil.toSystemIndependentName(node.entryFilePath) == normalizedTarget &&
+                        entryLine != null
+                    ) {
                         val name = node.name.ifBlank { "Process" }
                         hints.add(HintEntry(entryLine, "[P] $name", HintType.PROCESS))
                     }

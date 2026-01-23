@@ -39,6 +39,12 @@
         <codeInsight.inlayProvider
             language="kotlin"
             implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
+        <codeInsight.inlayProvider
+            language="Markdown"
+            implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
+        <codeInsight.inlayProvider
+            language="TEXT"
+            implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
         <toolWindow
             id="CodeRemarkTour"
             factoryClass="emohce.presentation.toolwindow.CodeRemarkTourToolWindowFactory"
