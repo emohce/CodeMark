@@ -35,6 +35,7 @@
 - 2026-01-23 22:00: InlayHintsPassFactory not available in target platform; plan shifted to refresh inlay hints via DaemonCodeAnalyzer restart (per file when possible).
 - 2026-01-23 22:12: Build errors: DaemonCodeAnalyzer.restart requires non-null PsiFile; adjust RefreshInlays handling to null-check and fall back. Also remove redundant qualifier in actionPerformed parameter.
 - 2026-01-23 22:20: Duplicate hints persisted; deduped collected hints globally by (line, type, label) in provider.
+- 2026-01-23 23:14: Hints not auto-refreshing after add; plan to normalize file paths and ensure VFS refresh before Daemon restart when handling RefreshInlays.
 
 
 [•]

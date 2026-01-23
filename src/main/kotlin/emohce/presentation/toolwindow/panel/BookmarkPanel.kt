@@ -12,6 +12,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.util.io.FileUtil
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
@@ -1500,7 +1501,8 @@ class BookmarkPanel(
                 tree.selectionPath?.let { tree.scrollPathToVisible(it) }
             }
             is BookmarkSideEffect.RefreshInlays -> {
-                val file = LocalFileSystem.getInstance().findFileByPath(effect.filePath) ?: return
+                val normalizedPath = FileUtil.toSystemIndependentName(effect.filePath)
+                val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath) ?: return
                 val psiFile = PsiManager.getInstance(project).findFile(file)
                 val analyzer = DaemonCodeAnalyzer.getInstance(project)
                 if (psiFile != null) {
