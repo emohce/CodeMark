@@ -14,7 +14,9 @@ import com.intellij.psi.PsiFile
 import com.intellij.util.ui.FormBuilder
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import javax.swing.JCheckBox
 import javax.swing.JComponent
 
@@ -30,6 +32,7 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
     override val key: SettingsKey<LineEndSettings> = SettingsKey("CodeRemarkTour.LineEnd")
     override val name: String = "CodeRemarkTour Line End"
     override val previewText: String = "fun demo() {}"
+    override val isVisibleInSettings: Boolean = false
 
     override fun createSettings(): LineEndSettings = LineEndSettings()
 
@@ -63,20 +66,25 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
         editor: Editor,
         settings: LineEndSettings,
         sink: InlayHintsSink
-    ): InlayHintsCollector {
+    ): InlayHintsCollector? {
+        if (!settings.enabled) return null
+        val virtualFile = file.virtualFile ?: return null
+        val document = PsiDocumentManager.getInstance(file.project).getDocument(file) ?: return null
+
+        // Resolve hints once per file to avoid recomputing for each PSI element and to keep
+        // any I/O off the EDT.
+        val hints = runBlocking {
+            withContext(Dispatchers.IO) {
+                val locator = ServiceLocator(file.project)
+                val root = locator.bookmarkRepository.getRootNode()
+                collectHints(root, virtualFile.path)
+            }
+        }
+        if (hints.isEmpty()) return null
+
         return object : FactoryInlayHintsCollector(editor) {
             override fun collect(element: PsiElement, editor: Editor, sink: InlayHintsSink): Boolean {
                 if (element !is PsiFile) return true
-                if (!settings.enabled) return false
-                val virtualFile = element.virtualFile ?: return false
-                val document = PsiDocumentManager.getInstance(element.project).getDocument(element)
-                    ?: return false
-                val hints = runBlocking {
-                    val locator = ServiceLocator(element.project)
-                    val root = locator.bookmarkRepository.getRootNode()
-                    collectHints(root, virtualFile.path)
-                }
-                if (hints.isEmpty()) return false
                 val caretLine = editor.caretModel.primaryCaret.logicalPosition.line
                 val byLine = hints.groupBy { it.line }
                 byLine.forEach { (line, entries) ->

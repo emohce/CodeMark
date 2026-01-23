@@ -1,4 +1,4 @@
-﻿package emohce.presentation.selection
+package emohce.presentation.selection
 
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -13,6 +13,8 @@ class SelectionBus {
     val requests: SharedFlow<String> = _requests.asSharedFlow()
     @Volatile
     private var currentContainerId: String? = null
+    @Volatile
+    private var lastSelectedNodeId: String? = null
 
     fun requestSelect(nodeId: String) {
         _requests.tryEmit(nodeId)
@@ -22,7 +24,12 @@ class SelectionBus {
         currentContainerId = containerId
     }
 
+    fun setLastSelectedNodeId(nodeId: String?) {
+        lastSelectedNodeId = nodeId
+    }
+
     fun getCurrentContainerId(): String? = currentContainerId
+    fun getLastSelectedNodeId(): String? = lastSelectedNodeId
 
     companion object {
         fun getInstance(project: Project): SelectionBus = project.service()

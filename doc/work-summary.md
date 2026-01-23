@@ -20,6 +20,15 @@
 - 2026-01-22 15:52: Logged new request to fix project compile errors (BookmarkRepositoryImpl, BookmarkPanel, BookmarkViewModel, inlay provider). No code changes yet.
 - 2026-01-22: Noted compile error in BookmarkLineEndInlayProvider createComponent signature; adjusted work plan accordingly.
 - 2026-01-23 17:07: User reported ServiceConfigurationError for CoroutineExceptionHandler (IntelliJ CoroutineExceptionHandlerImpl not a subtype) and empty Bookmark toolwindow content; planning to remove bundled kotlinx-coroutines overrides and rely on platform-provided version.
+- 2026-01-23 17:21: User reported line end hints not showing; investigating BookmarkLineEndInlayProvider registration and data source for current file.
+- 2026-01-23 17:23: Analysis: provider registered for Java/Kotlin in plugin.xml; code resolves root via ServiceLocator every collect; likely no hints because stored bookmarks missing file path match or runBlocking on EDT may block collectors—plan to cache lookup and filter by current file path; also ensure extension point name matches new InlayHintsProvider API (line-end inlays use com.intellij.codeInsight.inlayProvider).
+- 2026-01-23 17:36: Build error: “Suspension functions can only be called within coroutine body” at BookmarkLineEndInlayProvider.kt:80 due to calling suspend repository method inside ReadAction lambda; plan to move suspend call outside ReadAction and keep IO dispatcher.
+- 2026-01-23 17:40: User reported toast shows “Bookmark created” but tree does not update even after refresh; suspect ServiceLocator creates separate BookmarkStore per action vs toolwindow, causing state divergence; plan to share BookmarkStore per project (singleton cache/service) so actions and toolwindow see same data.
+- 2026-01-23 17:42: Added BookmarkStoreProvider singleton and wired ServiceLocator to use it so all consumers share the same store; expect bookmark actions to update toolwindow tree after refresh.
+- 2026-01-23 17:44: Made line-end inlays auto-enabled and hidden from settings UI (isVisibleInSettings=false, isEnabledByDefault=true) so users don’t need to toggle manually.
+- 2026-01-23 17:45: Build error “isEnabledByDefault overrides nothing” (API doesn’t expose that property); will remove override and rely on default enablement while keeping settings UI hidden.
+- 2026-01-23 17:49: For auto-refresh and proper insertion after add, introduced SelectionBus tracking of last selected node (by ID) to target insertion and selection after creation; pending UI wiring.
+- 2026-01-23 18:20: Wired BookmarkPanel to record last selection, compute insertionTarget (child of group/process or after selected leaf), pass insertIndex to Create* intents, and auto-select created node; unresolved reference fixed.
 
 
 [•]
@@ -48,3 +57,7 @@
 添加高级搜索 (正则表达式、按文件路径)
 [ ]
 实现书签复制/克隆功能
+
+## Future
+
+* Open a file with stored bookmarks and enable “CodeRemarkTour Line End” in Settings > Editor > Inlay Hints; verify hints appear on bookmarked lines.

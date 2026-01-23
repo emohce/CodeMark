@@ -1,4 +1,4 @@
-﻿package emohce.presentation.toolwindow
+package emohce.presentation.toolwindow
 
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.project.Project
@@ -54,10 +54,10 @@ class BookmarkViewModel(
         scope.launch {
             when (intent) {
                 is BookmarkIntent.SelectNode -> handleSelectNode(intent.nodeId)
-                is BookmarkIntent.CreateBookmark -> handleCreateBookmark(intent.parentId, intent.bookmark)
-                is BookmarkIntent.CreateGroup -> handleCreateGroup(intent.parentId, intent.group)
-                is BookmarkIntent.CreateProcess -> handleCreateProcess(intent.parentId, intent.process)
-                is BookmarkIntent.CreateDescriptive -> handleCreateDescriptive(intent.parentId, intent.note)
+                is BookmarkIntent.CreateBookmark -> handleCreateBookmark(intent.parentId, intent.bookmark, intent.insertIndex)
+                is BookmarkIntent.CreateGroup -> handleCreateGroup(intent.parentId, intent.group, intent.insertIndex)
+                is BookmarkIntent.CreateProcess -> handleCreateProcess(intent.parentId, intent.process, intent.insertIndex)
+                is BookmarkIntent.CreateDescriptive -> handleCreateDescriptive(intent.parentId, intent.note, intent.insertIndex)
                 is BookmarkIntent.EditNode -> handleEditNode(intent.node)
                 is BookmarkIntent.MoveNode -> handleMoveNode(intent.nodeId, intent.newParentId, intent.newIndex)
                 is BookmarkIntent.DeleteNode -> handleDeleteNode(intent.nodeId)
@@ -124,20 +124,20 @@ class BookmarkViewModel(
         _state.update { it.copy(selectedNodeId = nodeId) }
     }
 
-    private suspend fun handleCreateBookmark(parentId: String?, bookmark: BookmarkNode.Bookmark) {
-        bookmarkRepository.create(bookmark, parentId)
+    private suspend fun handleCreateBookmark(parentId: String?, bookmark: BookmarkNode.Bookmark, insertIndex: Int?) {
+        bookmarkRepository.create(bookmark, parentId, insertIndex)
     }
 
-    private suspend fun handleCreateGroup(parentId: String?, group: BookmarkNode.Group) {
-        bookmarkRepository.create(group, parentId)
+    private suspend fun handleCreateGroup(parentId: String?, group: BookmarkNode.Group, insertIndex: Int?) {
+        bookmarkRepository.create(group, parentId, insertIndex)
     }
 
-    private suspend fun handleCreateProcess(parentId: String?, process: BookmarkNode.Process) {
-        bookmarkRepository.create(process, parentId)
+    private suspend fun handleCreateProcess(parentId: String?, process: BookmarkNode.Process, insertIndex: Int?) {
+        bookmarkRepository.create(process, parentId, insertIndex)
     }
 
-    private suspend fun handleCreateDescriptive(parentId: String?, note: BookmarkNode.DescriptiveBookmark) {
-        bookmarkRepository.create(note, parentId)
+    private suspend fun handleCreateDescriptive(parentId: String?, note: BookmarkNode.DescriptiveBookmark, insertIndex: Int?) {
+        bookmarkRepository.create(note, parentId, insertIndex)
     }
 
     private suspend fun handleEditNode(node: BookmarkNode) {
@@ -341,10 +341,10 @@ data class BookmarkViewState(
 
 sealed class BookmarkIntent {
     data class SelectNode(val nodeId: String) : BookmarkIntent()
-    data class CreateBookmark(val parentId: String?, val bookmark: BookmarkNode.Bookmark) : BookmarkIntent()
-    data class CreateGroup(val parentId: String?, val group: BookmarkNode.Group) : BookmarkIntent()
-    data class CreateProcess(val parentId: String?, val process: BookmarkNode.Process) : BookmarkIntent()
-    data class CreateDescriptive(val parentId: String?, val note: BookmarkNode.DescriptiveBookmark) : BookmarkIntent()
+    data class CreateBookmark(val parentId: String?, val bookmark: BookmarkNode.Bookmark, val insertIndex: Int?) : BookmarkIntent()
+    data class CreateGroup(val parentId: String?, val group: BookmarkNode.Group, val insertIndex: Int?) : BookmarkIntent()
+    data class CreateProcess(val parentId: String?, val process: BookmarkNode.Process, val insertIndex: Int?) : BookmarkIntent()
+    data class CreateDescriptive(val parentId: String?, val note: BookmarkNode.DescriptiveBookmark, val insertIndex: Int?) : BookmarkIntent()
     data class EditNode(val node: BookmarkNode) : BookmarkIntent()
     data class MoveNode(val nodeId: String, val newParentId: String?, val newIndex: Int) : BookmarkIntent()
     data class DeleteNode(val nodeId: String) : BookmarkIntent()

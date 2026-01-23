@@ -112,6 +112,7 @@ class BookmarkPanel(
                 }
             }
             SelectionBus.getInstance(project).setCurrentContainerId(currentContainerId())
+            SelectionBus.getInstance(project).setLastSelectedNodeId(node?.uuid)
         }
         tree.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "collapse")
         tree.actionMap.put("collapse", object : AbstractAction() {
@@ -386,6 +387,39 @@ class BookmarkPanel(
         }.filter { it.uuid != "root" }
     }
 
+    private fun insertionTarget(): Pair<String?, Int?> {
+        val root = treeModel.root as? DefaultMutableTreeNode ?: return "root" to null
+        val lastSelectedId = SelectionBus.getInstance(project).getLastSelectedNodeId()
+        val selectedTreeNode = lastSelectedId?.let { findNodeById(root, it) }
+        val selectedView = selectedTreeNode?.userObject as? NodeView
+        val selectedNode = selectedView?.node
+
+        return when (selectedNode) {
+            is BookmarkNode.Group, is BookmarkNode.Process -> {
+                val childCount = realChildCount(selectedTreeNode)
+                selectedNode.uuid to childCount
+            }
+            is BookmarkNode.Bookmark, is BookmarkNode.DescriptiveBookmark -> {
+                val parent = selectedTreeNode.parent as? DefaultMutableTreeNode
+                val parentView = parent?.userObject as? NodeView
+                val parentId = when (val pNode = parentView?.node) {
+                    is BookmarkNode.Group -> pNode.uuid
+                    is BookmarkNode.Process -> pNode.uuid
+                    else -> "root"
+                }
+                val indexInParent = parent?.getIndex(selectedTreeNode)?.takeIf { it >= 0 }
+                parentId to indexInParent?.plus(1)
+            }
+            else -> "root" to null
+        }
+    }
+
+    private fun realChildCount(node: DefaultMutableTreeNode?): Int {
+        if (node == null) return 0
+        if (hasPlaceholder(node)) return 0
+        return node.childCount
+    }
+
     private fun currentContainerId(): String? {
         val selected = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return null
         val node = (selected.userObject as? NodeView)?.node
@@ -611,9 +645,10 @@ class BookmarkPanel(
     private fun createGroup() {
         val name = Messages.showInputDialog(project, "Group name:", "Create Group", null) ?: return
         if (name.isBlank()) return
-        val parentId = selectedContainerId()
+        val (parentId, insertIndex) = insertionTarget()
         val group = BookmarkNode.Group(name = name.trim())
-        viewModel.processIntent(BookmarkIntent.CreateGroup(parentId, group))
+        viewModel.processIntent(BookmarkIntent.CreateGroup(parentId, group, insertIndex))
+        SelectionBus.getInstance(project).requestSelect(group.uuid)
     }
 
     private fun createProcess() {
@@ -624,14 +659,15 @@ class BookmarkPanel(
         val entryLineText = Messages.showInputDialog(project, "Entry line (optional):", "Create Process", null)
         val entryLine = entryLineText?.toIntOrNull()
         if (!entryPath.isNullOrBlank() && !ensureFileExists(entryPath, "Create Process")) return
-        val parentId = selectedContainerId()
+        val (parentId, insertIndex) = insertionTarget()
         val process = BookmarkNode.Process(
             name = name.trim(),
             description = description,
             entryFilePath = entryPath?.takeIf { it.isNotBlank() },
             entryLine = entryLine
         )
-        viewModel.processIntent(BookmarkIntent.CreateProcess(parentId, process))
+        viewModel.processIntent(BookmarkIntent.CreateProcess(parentId, process, insertIndex))
+        SelectionBus.getInstance(project).requestSelect(process.uuid)
     }
 
     private fun createBookmark() {
@@ -641,9 +677,10 @@ class BookmarkPanel(
         if (!ensureFileExists(filePath, "Create Bookmark")) return
         val lineText = Messages.showInputDialog(project, "Line number:", "Create Bookmark", null) ?: "0"
         val line = (lineText.toIntOrNull() ?: 0).coerceAtLeast(0)
-        val parentId = selectedContainerId()
+        val (parentId, insertIndex) = insertionTarget()
         val bookmark = BookmarkNode.Bookmark(name = name.trim(), filePath = filePath.trim(), line = line)
-        viewModel.processIntent(BookmarkIntent.CreateBookmark(parentId, bookmark))
+        viewModel.processIntent(BookmarkIntent.CreateBookmark(parentId, bookmark, insertIndex))
+        SelectionBus.getInstance(project).requestSelect(bookmark.uuid)
     }
 
     private fun createDescriptive() {
@@ -651,13 +688,14 @@ class BookmarkPanel(
         if (name.isBlank()) return
         val description = Messages.showInputDialog(project, "Description:", "Create Note", null) ?: ""
         val markdown = Messages.showInputDialog(project, "Markdown:", "Create Note", null) ?: ""
-        val parentId = selectedContainerId()
+        val (parentId, insertIndex) = insertionTarget()
         val note = BookmarkNode.DescriptiveBookmark(
             name = name.trim(),
             description = description.trim(),
             markdownContent = markdown
         )
-        viewModel.processIntent(BookmarkIntent.CreateDescriptive(parentId, note))
+        viewModel.processIntent(BookmarkIntent.CreateDescriptive(parentId, note, insertIndex))
+        SelectionBus.getInstance(project).requestSelect(note.uuid)
     }
 
     private fun editSelected() {
@@ -1085,13 +1123,13 @@ class BookmarkPanel(
             val clone = cloneForInsert(node)
             when (clone) {
                 is BookmarkNode.Bookmark ->
-                    viewModel.processIntent(BookmarkIntent.CreateBookmark(target.uuid, clone))
+                    viewModel.processIntent(BookmarkIntent.CreateBookmark(target.uuid, clone, null))
                 is BookmarkNode.DescriptiveBookmark ->
-                    viewModel.processIntent(BookmarkIntent.CreateDescriptive(target.uuid, clone))
+                    viewModel.processIntent(BookmarkIntent.CreateDescriptive(target.uuid, clone, null))
                 is BookmarkNode.Group ->
-                    viewModel.processIntent(BookmarkIntent.CreateGroup(target.uuid, clone))
+                    viewModel.processIntent(BookmarkIntent.CreateGroup(target.uuid, clone, null))
                 is BookmarkNode.Process ->
-                    viewModel.processIntent(BookmarkIntent.CreateProcess(target.uuid, clone))
+                    viewModel.processIntent(BookmarkIntent.CreateProcess(target.uuid, clone, null))
             }
         }
     }
