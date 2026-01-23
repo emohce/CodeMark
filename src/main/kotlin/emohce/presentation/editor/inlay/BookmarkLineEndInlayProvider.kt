@@ -14,7 +14,6 @@ import com.intellij.openapi.util.io.FileUtil
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
-import com.intellij.ui.JBColor
 import com.intellij.util.ui.FormBuilder
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
@@ -102,10 +101,15 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
                         (it.type == HintType.BOOKMARK && settings.showBookmarks) ||
                             (it.type == HintType.PROCESS && settings.showProcesses)
                     }
-                    val count = filtered.size
-                    if (count == 0) return@forEach
+                    if (filtered.isEmpty()) return@forEach
+                    val distinct = filtered.distinctBy { it.id }
+                    val label = if (distinct.size == 1) {
+                        distinct.first().label.ifBlank { "Bookmark" }
+                    } else {
+                        distinct.size.toString()
+                    }
                     val offset = document.getLineEndOffset(line)
-                    val presentation = createBadgePresentation(factory, count)
+                    val presentation = createBadgePresentation(factory, label)
                     sink.addInlineElement(offset, true, presentation, false)
                 }
                 return false
@@ -113,10 +117,9 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
         }
     }
 
-    private fun createBadgePresentation(factory: PresentationFactory, count: Int): InlayPresentation {
-        val text = factory.smallText(" $count ")
-        val withBackground = factory.roundWithBackground(text)
-        return withBackground
+    private fun createBadgePresentation(factory: PresentationFactory, textValue: String): InlayPresentation {
+        val text = factory.smallText(" $textValue ")
+        return factory.roundWithBackground(text)
     }
 
     private fun collectHints(root: BookmarkNode, filePath: String): List<HintEntry> {
@@ -126,7 +129,8 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
             when (node) {
                 is BookmarkNode.Bookmark -> {
                     if (FileUtil.toSystemIndependentName(node.filePath) == normalizedTarget) {
-                        hints.add(HintEntry(node.line, node.uuid, HintType.BOOKMARK))
+                        val label = node.name.ifBlank { "Bookmark" }
+                        hints.add(HintEntry(node.line, label, node.uuid, HintType.BOOKMARK))
                     }
                 }
                 is BookmarkNode.Process -> {
@@ -135,7 +139,8 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
                         FileUtil.toSystemIndependentName(node.entryFilePath) == normalizedTarget &&
                         entryLine != null
                     ) {
-                        hints.add(HintEntry(entryLine, node.uuid, HintType.PROCESS))
+                        val label = node.name.ifBlank { "Process" }
+                        hints.add(HintEntry(entryLine, label, node.uuid, HintType.PROCESS))
                     }
                 }
                 else -> Unit
@@ -153,7 +158,7 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
         }
     }
 
-    private data class HintEntry(val line: Int, val id: String, val type: HintType)
+    private data class HintEntry(val line: Int, val label: String, val id: String, val type: HintType)
 
     private enum class HintType { BOOKMARK, PROCESS }
 }
