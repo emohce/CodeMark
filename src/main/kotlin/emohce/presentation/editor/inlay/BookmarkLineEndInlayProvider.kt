@@ -10,18 +10,33 @@ import com.intellij.codeInsight.hints.SettingsKey
 import com.intellij.codeInsight.hints.presentation.InlayPresentation
 import com.intellij.codeInsight.hints.presentation.PresentationFactory
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.util.ui.FormBuilder
+import emohce.presentation.editor.inlay.BookmarkInlayRenderer
+import emohce.presentation.toolwindow.BookmarkViewModel
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
+import javax.swing.JCheckBox
+import javax.swing.JComponent
+import javax.swing.JPanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
-import javax.swing.JCheckBox
-import javax.swing.JComponent
+
+enum class HintType {
+    BOOKMARK, PROCESS
+}
+
+data class HintEntry(
+    val line: Int,
+    val label: String,
+    val id: String,
+    val type: HintType
+)
 
 data class LineEndSettings(
     var enabled: Boolean = true,
@@ -44,22 +59,8 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
             override val mainCheckboxText: String = "Enable line end hints"
 
             override fun createComponent(listener: ChangeListener): JComponent {
-                val enabled = JCheckBox("Enable line end hints", settings.enabled)
-                val onlyCurrentLine = JCheckBox("Only current caret line", settings.onlyCurrentLine)
-                val showBookmarks = JCheckBox("Show bookmarks", settings.showBookmarks)
-                val showProcesses = JCheckBox("Show processes", settings.showProcesses)
-
-                enabled.addActionListener { settings.enabled = enabled.isSelected; listener.settingsChanged() }
-                onlyCurrentLine.addActionListener { settings.onlyCurrentLine = onlyCurrentLine.isSelected; listener.settingsChanged() }
-                showBookmarks.addActionListener { settings.showBookmarks = showBookmarks.isSelected; listener.settingsChanged() }
-                showProcesses.addActionListener { settings.showProcesses = showProcesses.isSelected; listener.settingsChanged() }
-
-                return FormBuilder.createFormBuilder()
-                    .addComponent(enabled)
-                    .addComponent(onlyCurrentLine)
-                    .addComponent(showBookmarks)
-                    .addComponent(showProcesses)
-                    .panel
+                // Since we don't show in settings, return empty panel
+                return JPanel()
             }
         }
     }
@@ -83,6 +84,8 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
             }
         }
         if (hints.isEmpty()) return null
+
+        val viewModel = ServiceLocator(file.project).bookmarkViewModel
 
         return object : FactoryInlayHintsCollector(editor) {
             private var collected = false
@@ -109,7 +112,7 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
                         distinct.size.toString()
                     }
                     val offset = document.getLineEndOffset(line)
-                    val presentation = createBadgePresentation(factory, label)
+                    val presentation = createBadgePresentation(factory, label, distinct.first().id, normalizedPath, line, file.project, editor, viewModel)
                     sink.addInlineElement(offset, true, presentation, false)
                 }
                 return false
@@ -117,14 +120,33 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
         }
     }
 
-    private fun createBadgePresentation(factory: PresentationFactory, textValue: String): InlayPresentation {
-        val text = factory.smallText(" $textValue ")
-        return factory.roundWithBackground(text)
+    private fun createBadgePresentation(
+        factory: PresentationFactory,
+        textValue: String,
+        nodeId: String,
+        filePath: String,
+        line: Int,
+        project: Project,
+        editor: Editor,
+        viewModel: BookmarkViewModel
+    ): InlayPresentation {
+        val renderer = BookmarkInlayRenderer(textValue, nodeId, filePath, line, project, editor, viewModel)
+        // Return the custom renderer directly as it implements InlayPresentation
+        return renderer
     }
 
     private fun collectHints(root: BookmarkNode, filePath: String): List<HintEntry> {
         val hints = mutableListOf<HintEntry>()
         val normalizedTarget = FileUtil.toSystemIndependentName(filePath)
+        
+        fun traverse(node: BookmarkNode, action: (BookmarkNode) -> Unit) {
+            action(node)
+            when (node) {
+                is BookmarkNode.Group -> node.children.forEach { traverse(it, action) }
+                else -> Unit
+            }
+        }
+        
         traverse(root) { node ->
             when (node) {
                 is BookmarkNode.Bookmark -> {

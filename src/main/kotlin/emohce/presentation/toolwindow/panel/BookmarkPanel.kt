@@ -3,9 +3,12 @@ package emohce.presentation.toolwindow.panel
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
+import com.intellij.codeInsight.hints.ParameterHintsPassFactory
 import com.intellij.psi.PsiManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
@@ -1505,6 +1508,13 @@ class BookmarkPanel(
                 val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath) ?: return
                 val psiFile = PsiManager.getInstance(project).findFile(file)
                 val analyzer = DaemonCodeAnalyzer.getInstance(project)
+                FileEditorManager.getInstance(project)
+                    .getEditors(file)
+                    .forEach { editor ->
+                        (editor as? TextEditor)?.editor?.let { textEditor ->
+                            ParameterHintsPassFactory.forceHintsUpdateOnNextPass(textEditor)
+                        }
+                    }
                 if (psiFile != null) {
                     analyzer.restart(psiFile)
                 } else {

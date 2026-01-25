@@ -2,10 +2,12 @@
 
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.ui.Messages
+import com.intellij.psi.PsiManager
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
 import emohce.presentation.selection.SelectionBus
@@ -37,6 +39,14 @@ class CreateBookmarkAtCaretAction : AnAction() {
         runBlocking {
             val locator = ServiceLocator(project)
             locator.bookmarkRepository.create(bookmark, parentId)
+        }
+
+        val psiFile = PsiManager.getInstance(project).findFile(file)
+        val analyzer = DaemonCodeAnalyzer.getInstance(project)
+        if (psiFile != null) {
+            analyzer.restart(psiFile)
+        } else {
+            analyzer.restart()
         }
 
         SelectionBus.getInstance(project).requestSelect(bookmark.uuid)
