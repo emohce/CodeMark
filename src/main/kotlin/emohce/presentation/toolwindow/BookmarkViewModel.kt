@@ -143,7 +143,21 @@ class BookmarkViewModel(
                         }
                         path?.let { _sideEffects.emit(BookmarkSideEffect.RefreshInlays(it)) }
                     }
-                    is BookmarkEvent.NodeUpdated -> reloadBookmarks()
+                    is BookmarkEvent.NodeUpdated -> {
+                        reloadBookmarks()
+                        // 等待 reloadBookmarks 完成后再选择节点，确保使用最新数据
+                        _sideEffects.emit(BookmarkSideEffect.SelectNode(event.node.uuid))
+                        // 刷新编辑器 Inlay
+                        when (val node = event.node) {
+                            is BookmarkNode.Bookmark -> {
+                                _sideEffects.emit(BookmarkSideEffect.RefreshInlays(node.filePath))
+                            }
+                            is BookmarkNode.Process -> {
+                                node.entryFilePath?.let { _sideEffects.emit(BookmarkSideEffect.RefreshInlays(it)) }
+                            }
+                            else -> Unit
+                        }
+                    }
                     is BookmarkEvent.NodeRemoved -> reloadBookmarks()
                     is BookmarkEvent.NodeMoved -> reloadBookmarks()
                     is BookmarkEvent.ReferenceSynced -> Unit
@@ -265,7 +279,19 @@ class BookmarkViewModel(
         }
         // 编辑后立即刷新树形结构和 JSON
         reloadBookmarks()
-        _sideEffects.emit(BookmarkSideEffect.SelectNode(node.uuid))
+        
+        // 编辑后刷新打开的 bookmarkx.json 编辑器
+        _sideEffects.emit(BookmarkSideEffect.RefreshBookmarkxJson)
+        
+        // 编辑后导航到书签位置（确保编辑器显示最新位置）
+        if (node is BookmarkNode.Bookmark) {
+            _sideEffects.emit(BookmarkSideEffect.NavigateToFile(node.filePath, node.line, node.column))
+        } else if (node is BookmarkNode.Process) {
+            node.entryFilePath?.let { path ->
+                val line = node.entryLine ?: 0
+                _sideEffects.emit(BookmarkSideEffect.NavigateToFile(path, line, 0))
+            }
+        }
     }
 
     private suspend fun handleMoveNode(nodeId: String, newParentId: String?, newIndex: Int) {
@@ -497,4 +523,6 @@ sealed class BookmarkSideEffect {
     data object ScrollToSelected : BookmarkSideEffect()
     data class SelectNode(val nodeId: String) : BookmarkSideEffect()
     data class RefreshInlays(val filePath: String) : BookmarkSideEffect()
+    /** 刷新打开的 bookmarkx.json 编辑器 */
+    data object RefreshBookmarkxJson : BookmarkSideEffect()
 }

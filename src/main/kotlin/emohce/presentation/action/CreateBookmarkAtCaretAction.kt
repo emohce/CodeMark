@@ -1,4 +1,4 @@
-﻿package emohce.presentation.action
+package emohce.presentation.action
 
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
@@ -38,15 +38,10 @@ class CreateBookmarkAtCaretAction : AnAction() {
         val parentId = SelectionBus.getInstance(project).getCurrentContainerId()
         runBlocking {
             val locator = ServiceLocator(project)
-            locator.bookmarkRepository.create(bookmark, parentId)
-        }
-
-        val psiFile = PsiManager.getInstance(project).findFile(file)
-        val analyzer = DaemonCodeAnalyzer.getInstance(project)
-        if (psiFile != null) {
-            analyzer.restart(psiFile)
-        } else {
-            analyzer.restart()
+            // 通过 ViewModel 创建书签，确保 editor hints 和树形结构都自动刷新
+            locator.bookmarkViewModel.processIntent(
+                emohce.presentation.toolwindow.BookmarkIntent.CreateBookmark(parentId, bookmark, null)
+            )
         }
 
         SelectionBus.getInstance(project).requestSelect(bookmark.uuid)

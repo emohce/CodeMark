@@ -87,6 +87,7 @@ class BookmarkPanel(
     private var currentState: BookmarkViewState = BookmarkViewState()
     private var lastSelectedBeforeSearch: String? = null
     private var pendingSelectionAfterClear: String? = null
+    private var isSelectingFromSideEffect: Boolean = false
 
     private fun showPanelOkCancel(panel: JComponent, title: String): Boolean {
         val dialog = object : DialogWrapper(project) {
@@ -105,14 +106,27 @@ class BookmarkPanel(
         tree.cellRenderer = BookmarkTreeCellRenderer()
         tree.selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
         tree.addTreeSelectionListener {
+            // 如果是从 side effect 触发的选择，不执行导航
+            if (isSelectingFromSideEffect) {
+                val node = selectedNode()
+                if (node != null) {
+                    viewModel.processIntent(BookmarkIntent.SelectNode(node.uuid))
+                }
+                SelectionBus.getInstance(project).setCurrentContainerId(currentContainerId())
+                SelectionBus.getInstance(project).setLastSelectedNodeId(node?.uuid)
+                return@addTreeSelectionListener
+            }
+            
             val node = selectedNode()
             if (node != null) {
                 viewModel.processIntent(BookmarkIntent.SelectNode(node.uuid))
-                if (node is BookmarkNode.Bookmark) {
-                    viewModel.processIntent(BookmarkIntent.NavigateToBookmark(node))
-                } else if (node is BookmarkNode.Process) {
-                    val entryPath = node.entryFilePath
-                    val entryLine = node.entryLine
+                // 从最新的 state 中获取节点数据，确保使用最新数据
+                val latestNode = currentRoot?.let { findNodeInTree(it, node.uuid) } ?: node
+                if (latestNode is BookmarkNode.Bookmark) {
+                    viewModel.processIntent(BookmarkIntent.NavigateToBookmark(latestNode))
+                } else if (latestNode is BookmarkNode.Process) {
+                    val entryPath = latestNode.entryFilePath
+                    val entryLine = latestNode.entryLine
                     if (!entryPath.isNullOrBlank() && entryLine != null) {
                         navigateToFile(entryPath, entryLine, 0)
                     }
@@ -576,6 +590,19 @@ class BookmarkPanel(
     ): Boolean {
         if (nodeKey(current) != nodeKey(updated)) return false
 
+        // 更新当前节点的 userObject（NodeView），确保节点数据是最新的
+        val currentView = current.userObject as? NodeView
+        val updatedView = updated.userObject as? NodeView
+        if (currentView != null && updatedView != null && currentView.node.uuid == updatedView.node.uuid) {
+            // 如果节点数据已变化，更新 userObject
+            if (currentView.node != updatedView.node || 
+                currentView.referenceCount != updatedView.referenceCount ||
+                currentView.isReferencedTarget != updatedView.isReferencedTarget) {
+                current.userObject = updatedView
+                model.nodeChanged(current)
+            }
+        }
+
         val existingChildren = nodeChildren(current)
         val existingMap = existingChildren.associateBy { nodeKey(it) }.toMutableMap()
         val desiredKeys = mutableListOf<String>()
@@ -709,13 +736,24 @@ class BookmarkPanel(
     private fun editSelected() {
         val node = selectedNode() ?: return
         if (node.uuid == "root") return
-        val updated = when (node) {
-            is BookmarkNode.Bookmark -> editBookmark(node)
-            is BookmarkNode.DescriptiveBookmark -> editDescriptive(node)
-            is BookmarkNode.Group -> editGroup(node)
-            is BookmarkNode.Process -> editProcess(node)
+        // 从最新的 state 中获取节点数据，确保使用最新数据
+        val latestNode = currentRoot?.let { findNodeInTree(it, node.uuid) } ?: node
+        val updated = when (latestNode) {
+            is BookmarkNode.Bookmark -> editBookmark(latestNode)
+            is BookmarkNode.DescriptiveBookmark -> editDescriptive(latestNode)
+            is BookmarkNode.Group -> editGroup(latestNode)
+            is BookmarkNode.Process -> editProcess(latestNode)
         } ?: return
         viewModel.processIntent(BookmarkIntent.EditNode(updated))
+    }
+    
+    private fun findNodeInTree(root: BookmarkNode, targetId: String): BookmarkNode? {
+        if (root.uuid == targetId) return root
+        return when (root) {
+            is BookmarkNode.Group -> root.children.firstNotNullOfOrNull { findNodeInTree(it, targetId) }
+            is BookmarkNode.Process -> root.steps.firstNotNullOfOrNull { findNodeInTree(it, targetId) }
+            else -> null
+        }
     }
 
     private fun editBookmark(node: BookmarkNode.Bookmark): BookmarkNode.Bookmark? {
@@ -1500,8 +1538,28 @@ class BookmarkPanel(
             is BookmarkSideEffect.ScrollToSelected -> Unit
             is BookmarkSideEffect.SelectNode -> {
                 SelectionBus.getInstance(project).setLastSelectedNodeId(effect.nodeId)
-                selectNodeById(effect.nodeId)
-                tree.selectionPath?.let { tree.scrollPathToVisible(it) }
+                // 使用 invokeLater 延迟执行，确保树结构已经更新完成
+                javax.swing.SwingUtilities.invokeLater {
+                    // 设置标志，防止触发导航
+                    isSelectingFromSideEffect = true
+                    selectNodeById(effect.nodeId)
+                    // 确保展开到节点路径，包括所有父节点
+                    tree.selectionPath?.let { path ->
+                        // 展开路径上的所有节点
+                        var currentPath = path
+                        while (currentPath != null && currentPath.pathCount > 0) {
+                            tree.expandPath(currentPath)
+                            currentPath = currentPath.parentPath
+                        }
+                        tree.scrollPathToVisible(path)
+                    }
+                    // 在下一个事件循环中清除标志，确保 TreeSelectionListener 已经处理完
+                    // TreeSelectionListener 是同步执行的，所以 selectNodeById 之后会立即执行
+                    // 使用 invokeLater 确保清除操作在 TreeSelectionListener 之后执行
+                    javax.swing.SwingUtilities.invokeLater {
+                        isSelectingFromSideEffect = false
+                    }
+                }
             }
             is BookmarkSideEffect.RefreshInlays -> {
                 val normalizedPath = FileUtil.toSystemIndependentName(effect.filePath)
@@ -1519,6 +1577,27 @@ class BookmarkPanel(
                     analyzer.restart(psiFile)
                 } else {
                     analyzer.restart()
+                }
+            }
+            is BookmarkSideEffect.RefreshBookmarkxJson -> {
+                // 刷新打开的 bookmarkx.json 文件编辑器
+                val basePath = project.basePath ?: return
+                val bookmarkxPath = java.nio.file.Paths.get(basePath, ".bookmarkx", "bookmarkx.json")
+                val normalizedPath = FileUtil.toSystemIndependentName(bookmarkxPath.toString())
+                val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath) ?: return
+                
+                // 如果文件已打开，重新加载文档内容
+                val fileEditorManager = FileEditorManager.getInstance(project)
+                if (fileEditorManager.isFileOpen(file)) {
+                    // 刷新 VFS 文件
+                    file.refresh(false, false)
+                    // 重新加载文档
+                    val documentManager = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+                    val document = documentManager.getDocument(file)
+                    if (document != null) {
+                        // 重新从磁盘加载文件内容到文档
+                        documentManager.reloadFiles(file)
+                    }
                 }
             }
         }

@@ -138,15 +138,7 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
     private fun collectHints(root: BookmarkNode, filePath: String): List<HintEntry> {
         val hints = mutableListOf<HintEntry>()
         val normalizedTarget = FileUtil.toSystemIndependentName(filePath)
-        
-        fun traverse(node: BookmarkNode, action: (BookmarkNode) -> Unit) {
-            action(node)
-            when (node) {
-                is BookmarkNode.Group -> node.children.forEach { traverse(it, action) }
-                else -> Unit
-            }
-        }
-        
+
         traverse(root) { node ->
             when (node) {
                 is BookmarkNode.Bookmark -> {
@@ -179,8 +171,4 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
             else -> Unit
         }
     }
-
-    private data class HintEntry(val line: Int, val label: String, val id: String, val type: HintType)
-
-    private enum class HintType { BOOKMARK, PROCESS }
 }
