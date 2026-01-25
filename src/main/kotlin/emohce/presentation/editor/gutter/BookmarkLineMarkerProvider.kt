@@ -1,4 +1,4 @@
-﻿package emohce.presentation.editor.gutter
+package emohce.presentation.editor.gutter
 
 import com.intellij.codeInsight.daemon.LineMarkerInfo
 import com.intellij.codeInsight.daemon.LineMarkerProviderDescriptor
@@ -51,9 +51,21 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
         elements: MutableList<out PsiElement>,
         result: MutableCollection<in LineMarkerInfo<*>>
     ) {
+        val processedLines = mutableSetOf<Int>()
+        val file = elements.firstOrNull()?.containingFile?.virtualFile ?: return
+        val document = elements.firstOrNull()?.let { 
+            PsiDocumentManager.getInstance(it.project).getDocument(it.containingFile) 
+        } ?: return
+        
         for (element in elements) {
+            val line = document.getLineNumber(element.textOffset)
+            if (processedLines.contains(line)) continue
+            
             val marker = getLineMarkerInfo(element)
-            if (marker != null) result.add(marker)
+            if (marker != null) {
+                result.add(marker)
+                processedLines.add(line)
+            }
         }
     }
 
@@ -74,10 +86,12 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
 
     private fun collectMarkers(root: BookmarkNode, filePath: String): List<MarkerEntry> {
         val markers = mutableListOf<MarkerEntry>()
+        val seenLines = mutableSetOf<Int>()
         traverse(root) { node ->
             when (node) {
                 is BookmarkNode.Bookmark -> {
-                    if (node.filePath == filePath) {
+                    if (node.filePath == filePath && !seenLines.contains(node.line)) {
+                        seenLines.add(node.line)
                         markers.add(
                             MarkerEntry(
                                 line = node.line,
@@ -90,7 +104,8 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
                 }
                 is BookmarkNode.Process -> {
                     val entryLine = node.entryLine
-                    if (node.entryFilePath == filePath && entryLine != null) {
+                    if (node.entryFilePath == filePath && entryLine != null && !seenLines.contains(entryLine)) {
+                        seenLines.add(entryLine)
                         markers.add(
                             MarkerEntry(
                                 line = entryLine,

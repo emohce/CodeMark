@@ -56,6 +56,13 @@ tasks {
     withType<Test> {
         useJUnitPlatform()
     }
+
+    // Disable buildSearchableOptions task (not required for MVP)
+    // This task generates searchable options but can fail in some environments
+    // For MVP, we can skip it to avoid build failures
+    named("buildSearchableOptions") {
+        enabled = false
+    }
 }
 
 kotlin {
