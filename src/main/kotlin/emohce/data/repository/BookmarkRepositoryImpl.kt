@@ -1,4 +1,4 @@
-﻿package emohce.data.repository
+package emohce.data.repository
 
 import emohce.domain.event.BookmarkEvent
 import emohce.domain.model.BookmarkNode
@@ -12,6 +12,8 @@ import java.util.concurrent.ConcurrentHashMap
 class BookmarkRepositoryImpl(private val store: BookmarkStore) : BookmarkRepository {
     private val changes = MutableSharedFlow<BookmarkEvent>(extraBufferCapacity = 64)
     private val nodeStates = ConcurrentHashMap<String, MutableStateFlow<BookmarkNode?>>()
+    
+    fun getStore(): BookmarkStore = store
 
     override suspend fun getRootNode(): BookmarkNode.Group {
         return store.root

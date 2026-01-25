@@ -24,6 +24,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent
+import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.vfs.LocalFileSystem
+import java.nio.file.Paths
 
 class BookmarkViewModel(
     private val project: Project,
@@ -45,9 +52,16 @@ class BookmarkViewModel(
     )
     val sideEffects: SharedFlow<BookmarkSideEffect> = _sideEffects.asSharedFlow()
 
+    private var documentListener: emohce.presentation.editor.BookmarkDocumentListener? = null
+
     init {
         loadBookmarks()
         observeChanges()
+        observeFileChanges()
+    }
+
+    fun setDocumentListener(listener: emohce.presentation.editor.BookmarkDocumentListener) {
+        this.documentListener = listener
     }
 
     fun processIntent(intent: BookmarkIntent) {
@@ -83,6 +97,13 @@ class BookmarkViewModel(
     private suspend fun reloadBookmarks() {
         _state.update { it.copy(isLoading = true, error = null) }
         try {
+            // 如果 repository 支持重新加载，先重新加载数据
+            if (bookmarkRepository is emohce.data.repository.BookmarkRepositoryImpl) {
+                withContext(dispatchers.io) {
+                    (bookmarkRepository as emohce.data.repository.BookmarkRepositoryImpl).getStore().reload()
+                }
+            }
+            
             val root = withContext(dispatchers.io) {
                 bookmarkRepository.getRootNode()
             }
@@ -131,6 +152,67 @@ class BookmarkViewModel(
         }
     }
 
+    private fun observeFileChanges() {
+        val basePath = project.basePath ?: return
+        val bookmarkxPath = Paths.get(basePath, ".bookmarkx", "bookmarkx.json")
+        val normalizedPath = FileUtil.toSystemIndependentName(bookmarkxPath.toString())
+        
+        val messageBus = project.messageBus.connect(scope)
+        messageBus.subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
+            override fun after(events: MutableList<out VFileEvent>) {
+                var shouldReload = false
+                
+                for (event in events) {
+                    val file = event.file ?: continue
+                    val filePath = FileUtil.toSystemIndependentName(file.path)
+                    
+                    // 检查是否是 bookmarkx.json 文件变化
+                    if (filePath == normalizedPath) {
+                        shouldReload = true
+                        break
+                    }
+                }
+                
+                if (shouldReload) {
+                    // 文件变化后立即刷新，无延迟
+                    scope.launch {
+                        // 重新加载数据
+                        reloadBookmarks()
+                        
+                        // 刷新所有相关的编辑器 Inlay
+                        val root = withContext(dispatchers.io) {
+                            bookmarkRepository.getRootNode()
+                        }
+                        val affectedPaths = mutableSetOf<String>()
+                        traverseBookmarks(root) { node ->
+                            when (node) {
+                                is BookmarkNode.Bookmark -> {
+                                    affectedPaths.add(node.filePath)
+                                }
+                                is BookmarkNode.Process -> {
+                                    node.entryFilePath?.let { affectedPaths.add(it) }
+                                }
+                                else -> Unit
+                            }
+                        }
+                        affectedPaths.forEach { path ->
+                            _sideEffects.emit(BookmarkSideEffect.RefreshInlays(path))
+                        }
+                    }
+                }
+            }
+        })
+    }
+    
+    private fun traverseBookmarks(node: BookmarkNode, visitor: (BookmarkNode) -> Unit) {
+        visitor(node)
+        when (node) {
+            is BookmarkNode.Group -> node.children.forEach { traverseBookmarks(it, visitor) }
+            is BookmarkNode.Process -> node.steps.forEach { traverseBookmarks(it, visitor) }
+            else -> Unit
+        }
+    }
+
     private suspend fun handleSelectNode(nodeId: String) {
         _state.update { it.copy(selectedNodeId = nodeId) }
     }
@@ -140,6 +222,8 @@ class BookmarkViewModel(
         reloadBookmarks()
         _sideEffects.emit(BookmarkSideEffect.SelectNode(bookmark.uuid))
         _sideEffects.emit(BookmarkSideEffect.RefreshInlays(bookmark.filePath))
+        // 通知文档监听器书签已变化
+        documentListener?.onBookmarksChanged(bookmark.filePath)
     }
 
     private suspend fun handleCreateGroup(parentId: String?, group: BookmarkNode.Group, insertIndex: Int?) {
@@ -168,7 +252,20 @@ class BookmarkViewModel(
             if (count > 0) {
                 syncReferencesWithRetry(node.uuid, notifyOnSuccess = false)
             }
+            // 刷新编辑器 Inlay 提示
+            _sideEffects.emit(BookmarkSideEffect.RefreshInlays(node.filePath))
+            // 通知文档监听器书签已变化
+            documentListener?.onBookmarksChanged(node.filePath)
+        } else if (node is BookmarkNode.Process) {
+            // 刷新流程入口的 Inlay 提示
+            node.entryFilePath?.let { 
+                _sideEffects.emit(BookmarkSideEffect.RefreshInlays(it))
+                documentListener?.onBookmarksChanged(it)
+            }
         }
+        // 编辑后立即刷新树形结构和 JSON
+        reloadBookmarks()
+        _sideEffects.emit(BookmarkSideEffect.SelectNode(node.uuid))
     }
 
     private suspend fun handleMoveNode(nodeId: String, newParentId: String?, newIndex: Int) {
@@ -180,6 +277,10 @@ class BookmarkViewModel(
         if (node is BookmarkNode.Bookmark) {
             referenceRepository.deleteAllReferences(node.uuid)
             referenceRepository.deleteAllReferencesForTarget(node.uuid)
+            // 通知文档监听器书签已删除
+            documentListener?.onBookmarksChanged(node.filePath)
+        } else if (node is BookmarkNode.Process) {
+            node.entryFilePath?.let { documentListener?.onBookmarksChanged(it) }
         }
         bookmarkRepository.delete(nodeId)
     }

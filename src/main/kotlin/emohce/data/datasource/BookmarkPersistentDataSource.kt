@@ -1,4 +1,4 @@
-﻿package emohce.data.datasource
+package emohce.data.datasource
 
 import com.intellij.openapi.project.Project
 import emohce.data.persistence.BookmarkPersistentState
@@ -22,6 +22,11 @@ class BookmarkPersistentDataSource(private val project: Project) {
         return Path.of(basePath, ".bookmarkx", "bookmarkx.json")
     }
 
+    private fun resolveUndoPath(): Path {
+        val basePath = project.basePath ?: System.getProperty("user.dir")
+        return Path.of(basePath, ".bookmarkx", "bookmarkx.json.undo")
+    }
+
     fun load(): BookmarkPersistentState? {
         val path = resolvePath()
         if (!Files.exists(path)) return null
@@ -35,12 +40,28 @@ class BookmarkPersistentDataSource(private val project: Project) {
         }
     }
 
-    fun save(state: BookmarkPersistentState) {
+    fun save(state: BookmarkPersistentState, saveUndo: Boolean = true) {
         val path = resolvePath()
         Files.createDirectories(path.parent)
-        if (Files.exists(path)) {
-            backupFile(path, "bak-${Instant.now().epochSecond}")
+        
+        // 保存撤销文件：在保存新状态前，将当前状态保存到撤销文件
+        if (saveUndo && Files.exists(path)) {
+            try {
+                val currentContent = Files.readString(path)
+                val undoPath = resolveUndoPath()
+                Files.writeString(
+                    undoPath,
+                    currentContent,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING,
+                    StandardOpenOption.WRITE
+                )
+            } catch (e: Exception) {
+                // 忽略撤销文件保存失败
+            }
         }
+        
+        // 保存新状态
         val payload = json.encodeToString(state)
         Files.writeString(
             path,
@@ -51,6 +72,21 @@ class BookmarkPersistentDataSource(private val project: Project) {
         )
     }
 
+    fun loadUndo(): BookmarkPersistentState? {
+        val undoPath = resolveUndoPath()
+        if (!Files.exists(undoPath)) return null
+        return try {
+            val raw = Files.readString(undoPath)
+            json.decodeFromString<BookmarkPersistentState>(raw)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun hasUndo(): Boolean {
+        return Files.exists(resolveUndoPath())
+    }
+
     private fun migrateStateIfNeeded(
         state: BookmarkPersistentState,
         path: Path
@@ -58,11 +94,11 @@ class BookmarkPersistentDataSource(private val project: Project) {
         val current = BookmarkPersistentState.CURRENT_VERSION
         return when {
             state.version > current -> {
-                backupFile(path, "unsupported-${state.version}")
+                // 版本不支持，但不创建备份文件
                 null
             }
             state.version < current -> {
-                backupFile(path, "migrate-${state.version}-to-$current")
+                // 迁移版本，直接保存新版本
                 state.copy(version = current).also { save(it) }
             }
             else -> state
@@ -70,21 +106,7 @@ class BookmarkPersistentDataSource(private val project: Project) {
     }
 
     private fun backupCorruptFile(path: Path) {
-        try {
-            val timestamp = Instant.now().epochSecond
-            val backup = path.resolveSibling("${path.fileName}.corrupt-$timestamp")
-            Files.copy(path, backup, StandardCopyOption.REPLACE_EXISTING)
-        } catch (_: Exception) {
-            // Best-effort backup only.
-        }
-    }
-
-    private fun backupFile(path: Path, suffix: String) {
-        try {
-            val backup = path.resolveSibling("${path.fileName}.$suffix")
-            Files.copy(path, backup, StandardCopyOption.REPLACE_EXISTING)
-        } catch (_: Exception) {
-            // Best-effort backup only.
-        }
+        // 不再创建损坏文件的备份
+        // 文件损坏时直接返回 null，由系统重新初始化
     }
 }

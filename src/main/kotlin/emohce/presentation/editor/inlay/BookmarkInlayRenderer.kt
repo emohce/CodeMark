@@ -107,9 +107,8 @@ class BookmarkInlayRenderer(
                 is BookmarkNode.Process -> BookmarkEditDialogUtil.editProcess(project, node)
             } ?: return@runBlocking
 
+            // 发送编辑意图，ViewModel 会自动刷新树形结构和 JSON
             viewModel.processIntent(BookmarkIntent.EditNode(updated))
-            // Trigger refresh after edit
-            viewModel.processIntent(BookmarkIntent.Refresh)
         }
     }
 
