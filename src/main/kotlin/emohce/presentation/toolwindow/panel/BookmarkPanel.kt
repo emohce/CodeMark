@@ -16,6 +16,10 @@ import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.WriteIntentReadAction
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
@@ -74,6 +78,7 @@ class BookmarkPanel(
     private val project: Project,
     private val viewModel: BookmarkViewModel
 ) : JPanel(BorderLayout()), Disposable {
+    private val logger = Logger.getInstance(BookmarkPanel::class.java)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val treeModel = DefaultTreeModel(DefaultMutableTreeNode("Loading"))
     private val tree = Tree(treeModel)
@@ -106,9 +111,22 @@ class BookmarkPanel(
         tree.cellRenderer = BookmarkTreeCellRenderer()
         tree.selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
         tree.addTreeSelectionListener {
+            logger.info("=== TreeSelectionListener triggered ===")
+            // 检查是否有选择，如果没有选择则直接返回
+            val selectedPath = tree.selectionPath
+            logger.info("TreeSelectionListener: selectedPath=${selectedPath != null}, isSelectingFromSideEffect=$isSelectingFromSideEffect")
+            if (selectedPath == null) {
+                logger.warn("TreeSelectionListener: no selection path, ignoring (this may happen when selection is cleared)")
+                return@addTreeSelectionListener
+            }
+            
+            logger.info("TreeSelectionListener: selection path exists, processing selection")
+            
             // 如果是从 side effect 触发的选择，不执行导航
             if (isSelectingFromSideEffect) {
+                logger.info("Selection is from side effect, skipping navigation")
                 val node = selectedNode()
+                logger.info("Selected node from side effect: ${node?.uuid}, type=${node?.javaClass?.simpleName}")
                 if (node != null) {
                     viewModel.processIntent(BookmarkIntent.SelectNode(node.uuid))
                 }
@@ -118,19 +136,33 @@ class BookmarkPanel(
             }
             
             val node = selectedNode()
+            logger.info("User clicked node: ${node?.uuid}, type=${node?.javaClass?.simpleName}")
             if (node != null) {
                 viewModel.processIntent(BookmarkIntent.SelectNode(node.uuid))
                 // 从最新的 state 中获取节点数据，确保使用最新数据
-                val latestNode = currentRoot?.let { findNodeInTree(it, node.uuid) } ?: node
+                val latestNode = currentRoot?.let { 
+                    logger.info("Searching for node ${node.uuid} in currentRoot")
+                    findNodeInTree(it, node.uuid) 
+                } ?: node
+                logger.info("Latest node found: ${latestNode.uuid}, type=${latestNode.javaClass.simpleName}, currentRoot=${currentRoot != null}")
+                
                 if (latestNode is BookmarkNode.Bookmark) {
+                    logger.info("Navigating to bookmark: ${latestNode.filePath}:${latestNode.line}")
                     viewModel.processIntent(BookmarkIntent.NavigateToBookmark(latestNode))
                 } else if (latestNode is BookmarkNode.Process) {
                     val entryPath = latestNode.entryFilePath
                     val entryLine = latestNode.entryLine
+                    logger.info("Navigating to process entry: $entryPath:$entryLine")
                     if (!entryPath.isNullOrBlank() && entryLine != null) {
                         navigateToFile(entryPath, entryLine, 0)
+                    } else {
+                        logger.warn("Process entry path or line is null: path=$entryPath, line=$entryLine")
                     }
+                } else {
+                    logger.info("Node is not a Bookmark or Process, skipping navigation")
                 }
+            } else {
+                logger.warn("Selected node is null after checking selection path")
             }
             SelectionBus.getInstance(project).setCurrentContainerId(currentContainerId())
             SelectionBus.getInstance(project).setLastSelectedNodeId(node?.uuid)
@@ -169,15 +201,19 @@ class BookmarkPanel(
         tree.componentPopupMenu = createPopupMenu()
         tree.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
+                logger.info("Mouse pressed: button=${e.button}, isPopupTrigger=${e.isPopupTrigger}, clickCount=${e.clickCount}")
                 if (e.isPopupTrigger) selectNodeAt(e)
             }
 
             override fun mouseReleased(e: MouseEvent) {
+                logger.info("Mouse released: button=${e.button}, isPopupTrigger=${e.isPopupTrigger}, clickCount=${e.clickCount}")
                 if (e.isPopupTrigger) selectNodeAt(e)
             }
 
             override fun mouseClicked(e: MouseEvent) {
+                logger.info("Mouse clicked: button=${e.button}, clickCount=${e.clickCount}, isSelectingFromSideEffect=$isSelectingFromSideEffect")
                 if (e.clickCount == 2 && e.button == MouseEvent.BUTTON1) {
+                    logger.info("Double click detected, navigating to bookmark")
                     navigateSelectedBookmark()
                 }
             }
@@ -397,8 +433,21 @@ class BookmarkPanel(
     }
 
     private fun selectedNode(): BookmarkNode? {
-        val selected = tree.lastSelectedPathComponent as? DefaultMutableTreeNode ?: return null
-        return (selected.userObject as? NodeView)?.node
+        val selected = tree.lastSelectedPathComponent as? DefaultMutableTreeNode
+        if (selected == null) {
+            // 没有选择是正常情况，使用 debug 级别
+            logger.debug("selectedNode: tree.lastSelectedPathComponent is null or not DefaultMutableTreeNode")
+            return null
+        }
+        val nodeView = selected.userObject as? NodeView
+        if (nodeView == null) {
+            // userObject 不是 NodeView 可能是异常情况，记录警告
+            logger.warn("selectedNode: userObject is null or not NodeView, userObject=${selected.userObject?.javaClass?.simpleName}")
+            return null
+        }
+        val node = nodeView.node
+        logger.debug("selectedNode: found node ${node.uuid}, type=${node.javaClass.simpleName}")
+        return node
     }
 
     private fun selectedNodes(): List<BookmarkNode> {
@@ -466,8 +515,15 @@ class BookmarkPanel(
     }
 
     private fun selectNodeAt(event: MouseEvent) {
+        logger.info("selectNodeAt: x=${event.x}, y=${event.y}")
         val row = tree.getClosestRowForLocation(event.x, event.y)
-        if (row >= 0) tree.setSelectionRow(row)
+        logger.info("selectNodeAt: closest row=$row")
+        if (row >= 0) {
+            logger.info("selectNodeAt: setting selection row=$row")
+            tree.setSelectionRow(row)
+        } else {
+            logger.warn("selectNodeAt: row < 0, cannot set selection")
+        }
     }
 
     private fun startSearch() {
@@ -512,12 +568,25 @@ class BookmarkPanel(
     }
 
     private fun selectNodeById(nodeId: String) {
-        val root = treeModel.root as? DefaultMutableTreeNode ?: return
-        val node = findNodeById(root, nodeId) ?: return
+        logger.info("selectNodeById: searching for nodeId=$nodeId")
+        val root = treeModel.root as? DefaultMutableTreeNode
+        if (root == null) {
+            logger.warn("selectNodeById: treeModel.root is null")
+            return
+        }
+        val node = findNodeById(root, nodeId)
+        if (node == null) {
+            logger.warn("selectNodeById: node not found for nodeId=$nodeId")
+            return
+        }
+        logger.info("selectNodeById: node found, creating TreePath")
         val path = TreePath(node.path)
+        logger.info("selectNodeById: setting selection path, pathCount=${path.pathCount}")
         tree.selectionPath = path
+        logger.info("selectNodeById: selection path set, current selectionPath=${tree.selectionPath != null}")
         tree.expandPath(path)
         tree.scrollPathToVisible(path)
+        logger.info("selectNodeById: completed")
     }
 
     private fun restoreExpandedNodes(expandedIds: Set<String>) {
@@ -748,12 +817,31 @@ class BookmarkPanel(
     }
     
     private fun findNodeInTree(root: BookmarkNode, targetId: String): BookmarkNode? {
-        if (root.uuid == targetId) return root
-        return when (root) {
-            is BookmarkNode.Group -> root.children.firstNotNullOfOrNull { findNodeInTree(it, targetId) }
-            is BookmarkNode.Process -> root.steps.firstNotNullOfOrNull { findNodeInTree(it, targetId) }
-            else -> null
+        logger.debug("findNodeInTree: searching for $targetId in root ${root.uuid}, type=${root.javaClass.simpleName}")
+        if (root.uuid == targetId) {
+            logger.debug("findNodeInTree: found node ${root.uuid} at root")
+            return root
         }
+        val result = when (root) {
+            is BookmarkNode.Group -> {
+                logger.debug("findNodeInTree: searching in Group with ${root.children.size} children")
+                root.children.firstNotNullOfOrNull { findNodeInTree(it, targetId) }
+            }
+            is BookmarkNode.Process -> {
+                logger.debug("findNodeInTree: searching in Process with ${root.steps.size} steps")
+                root.steps.firstNotNullOfOrNull { findNodeInTree(it, targetId) }
+            }
+            else -> {
+                logger.debug("findNodeInTree: root is not Group or Process, returning null")
+                null
+            }
+        }
+        if (result != null) {
+            logger.debug("findNodeInTree: found node ${result.uuid}")
+        } else {
+            logger.debug("findNodeInTree: node $targetId not found in subtree of ${root.uuid}")
+        }
+        return result
     }
 
     private fun editBookmark(node: BookmarkNode.Bookmark): BookmarkNode.Bookmark? {
@@ -1533,50 +1621,77 @@ class BookmarkPanel(
 
     private fun handleSideEffect(effect: BookmarkSideEffect) {
         when (effect) {
-            is BookmarkSideEffect.NavigateToFile -> navigateToFile(effect.filePath, effect.line, effect.column)
+            is BookmarkSideEffect.NavigateToFile -> {
+                logger.info("NavigateToFile side effect received: filePath=${effect.filePath}, line=${effect.line}, column=${effect.column}")
+                navigateToFile(effect.filePath, effect.line, effect.column)
+            }
             is BookmarkSideEffect.ShowNotification -> notify(effect.message, effect.type)
             is BookmarkSideEffect.ScrollToSelected -> Unit
             is BookmarkSideEffect.SelectNode -> {
+                logger.info("SelectNode side effect received: nodeId=${effect.nodeId}")
                 SelectionBus.getInstance(project).setLastSelectedNodeId(effect.nodeId)
                 // 使用 invokeLater 延迟执行，确保树结构已经更新完成
                 javax.swing.SwingUtilities.invokeLater {
+                    logger.info("SelectNode invokeLater callback started, setting isSelectingFromSideEffect=true")
                     // 设置标志，防止触发导航
                     isSelectingFromSideEffect = true
+                    logger.info("Calling selectNodeById for nodeId=${effect.nodeId}")
                     selectNodeById(effect.nodeId)
+                    // TreeSelectionListener 是同步执行的，所以 selectNodeById 之后会立即执行
+                    // 此时 isSelectingFromSideEffect 是 true，所以不会执行导航
+                    logger.info("selectNodeById completed, TreeSelectionListener should have been triggered")
+                    
                     // 确保展开到节点路径，包括所有父节点
                     tree.selectionPath?.let { path ->
-                        // 展开路径上的所有节点
-                        var currentPath = path
+                        logger.info("Expanding path for nodeId=${effect.nodeId}")
+                        // 展开路径上的所有节点，从当前节点向上到根节点
+                        var currentPath: TreePath? = path
                         while (currentPath != null && currentPath.pathCount > 0) {
-                            tree.expandPath(currentPath)
-                            currentPath = currentPath.parentPath
+                            try {
+                                tree.expandPath(currentPath)
+                                val parent = currentPath.parentPath
+                                if (parent == null || parent.pathCount == 0) {
+                                    // 到达根节点，停止展开
+                                    break
+                                }
+                                currentPath = parent
+                            } catch (e: Exception) {
+                                logger.warn("Error expanding path: ${e.message}", e)
+                                break
+                            }
                         }
                         tree.scrollPathToVisible(path)
-                    }
-                    // 在下一个事件循环中清除标志，确保 TreeSelectionListener 已经处理完
-                    // TreeSelectionListener 是同步执行的，所以 selectNodeById 之后会立即执行
-                    // 使用 invokeLater 确保清除操作在 TreeSelectionListener 之后执行
+                    } ?: logger.warn("tree.selectionPath is null after selectNodeById")
+                    
+                    // 在下一个事件循环中清除标志，确保后续用户点击能够正常执行导航
+                    // 由于 TreeSelectionListener 是同步执行的，此时已经处理完了
                     javax.swing.SwingUtilities.invokeLater {
+                        logger.info("Clearing isSelectingFromSideEffect flag (current value=$isSelectingFromSideEffect)")
                         isSelectingFromSideEffect = false
+                        logger.info("isSelectingFromSideEffect flag cleared")
                     }
                 }
             }
             is BookmarkSideEffect.RefreshInlays -> {
                 val normalizedPath = FileUtil.toSystemIndependentName(effect.filePath)
                 val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath) ?: return
-                val psiFile = PsiManager.getInstance(project).findFile(file)
-                val analyzer = DaemonCodeAnalyzer.getInstance(project)
-                FileEditorManager.getInstance(project)
-                    .getEditors(file)
-                    .forEach { editor ->
-                        (editor as? TextEditor)?.editor?.let { textEditor ->
-                            ParameterHintsPassFactory.forceHintsUpdateOnNextPass(textEditor)
+                
+                // 使用 ReadAction 访问 PSI
+                ReadAction.run<Nothing> {
+                    val psiFile = PsiManager.getInstance(project).findFile(file)
+                    val analyzer = DaemonCodeAnalyzer.getInstance(project)
+                    FileEditorManager.getInstance(project)
+                        .getEditors(file)
+                        .forEach { editor ->
+                            (editor as? TextEditor)?.editor?.let { textEditor ->
+                                ParameterHintsPassFactory.forceHintsUpdateOnNextPass(textEditor)
+                            }
                         }
+                    if (psiFile != null) {
+                        analyzer.restart(psiFile)
+                    } else {
+                        analyzer.restart()
                     }
-                if (psiFile != null) {
-                    analyzer.restart(psiFile)
-                } else {
-                    analyzer.restart()
                 }
             }
             is BookmarkSideEffect.RefreshBookmarkxJson -> {
@@ -1586,17 +1701,20 @@ class BookmarkPanel(
                 val normalizedPath = FileUtil.toSystemIndependentName(bookmarkxPath.toString())
                 val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath) ?: return
                 
-                // 如果文件已打开，重新加载文档内容
-                val fileEditorManager = FileEditorManager.getInstance(project)
-                if (fileEditorManager.isFileOpen(file)) {
-                    // 刷新 VFS 文件
-                    file.refresh(false, false)
-                    // 重新加载文档
-                    val documentManager = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
-                    val document = documentManager.getDocument(file)
-                    if (document != null) {
-                        // 重新从磁盘加载文件内容到文档
-                        documentManager.reloadFiles(file)
+                // 使用 WriteIntentReadAction 来刷新文件
+                WriteIntentReadAction.run<Nothing> {
+                    // 如果文件已打开，重新加载文档内容
+                    val fileEditorManager = FileEditorManager.getInstance(project)
+                    if (fileEditorManager.isFileOpen(file)) {
+                        // 刷新 VFS 文件
+                        file.refresh(false, false)
+                        // 重新加载文档
+                        val documentManager = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+                        val document = documentManager.getDocument(file)
+                        if (document != null) {
+                            // 重新从磁盘加载文件内容到文档
+                            documentManager.reloadFiles(file)
+                        }
                     }
                 }
             }
@@ -1609,8 +1727,15 @@ class BookmarkPanel(
     }
 
     private fun navigateToFile(filePath: String, line: Int, column: Int) {
-        val file = LocalFileSystem.getInstance().findFileByPath(filePath) ?: return
+        logger.info("navigateToFile called: filePath=$filePath, line=$line, column=$column")
+        val file = LocalFileSystem.getInstance().findFileByPath(filePath)
+        if (file == null) {
+            logger.error("navigateToFile: file not found for path=$filePath")
+            return
+        }
+        logger.info("navigateToFile: file found, navigating to line=$line, column=$column")
         OpenFileDescriptor(project, file, line.coerceAtLeast(0), column.coerceAtLeast(0)).navigate(true)
+        logger.info("navigateToFile: navigation completed")
     }
 
     private fun ensureFileExists(path: String, title: String): Boolean {

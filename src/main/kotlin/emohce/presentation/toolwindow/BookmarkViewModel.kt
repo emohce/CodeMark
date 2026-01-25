@@ -30,6 +30,7 @@ import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.diagnostic.Logger
 import java.nio.file.Paths
 
 class BookmarkViewModel(
@@ -41,6 +42,7 @@ class BookmarkViewModel(
     private val detectCircularRefUseCase: DetectCircularRefUseCase,
     private val dispatchers: CoroutineDispatchers
 ) {
+    private val logger = Logger.getInstance(BookmarkViewModel::class.java)
     private val scope = CoroutineScope(dispatchers.main + SupervisorJob())
 
     private val _state = MutableStateFlow(BookmarkViewState())
@@ -407,13 +409,18 @@ class BookmarkViewModel(
     }
 
     private suspend fun handleNavigateToBookmark(bookmark: BookmarkNode.Bookmark) {
+        logger.info("handleNavigateToBookmark: bookmark=${bookmark.uuid}, filePath=${bookmark.filePath}, line=${bookmark.line}, column=${bookmark.column}")
         _state.update { it.copy(selectedNodeId = bookmark.uuid) }
+        logger.info("Emitting NavigateToFile side effect")
         _sideEffects.emit(BookmarkSideEffect.NavigateToFile(bookmark.filePath, bookmark.line, bookmark.column))
+        logger.info("Emitting SelectNode side effect")
         _sideEffects.emit(BookmarkSideEffect.SelectNode(bookmark.uuid))
+        logger.info("Emitting ScrollToSelected side effect")
         _sideEffects.emit(BookmarkSideEffect.ScrollToSelected)
 
         val progress = processNavigationUseCase.getProgress(bookmark)
         _state.update { it.copy(processProgress = progress) }
+        logger.info("handleNavigateToBookmark completed")
     }
 
     private suspend fun handleNavigateNext() {
