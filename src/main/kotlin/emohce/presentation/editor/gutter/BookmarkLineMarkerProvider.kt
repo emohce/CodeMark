@@ -6,6 +6,7 @@ import com.intellij.icons.AllIcons
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.IconLoader
+import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
@@ -70,7 +71,8 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
     }
 
     private fun getMarkers(project: Project, virtualFile: VirtualFile): List<MarkerEntry> {
-        val entry = cache[virtualFile.path]
+        val normalizedPath = FileUtil.toSystemIndependentName(virtualFile.path)
+        val entry = cache[normalizedPath]
         val now = System.currentTimeMillis()
         if (entry != null && now - entry.timestamp < 2000) {
             return entry.markers
@@ -78,19 +80,22 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
         val markers = runBlocking {
             val locator = ServiceLocator(project)
             val root = locator.bookmarkRepository.getRootNode()
-            collectMarkers(root, virtualFile.path)
+            collectMarkers(root, normalizedPath)
         }
-        cache[virtualFile.path] = CacheEntry(markers, now)
+        cache[normalizedPath] = CacheEntry(markers, now)
         return markers
     }
 
     private fun collectMarkers(root: BookmarkNode, filePath: String): List<MarkerEntry> {
         val markers = mutableListOf<MarkerEntry>()
         val seenLines = mutableSetOf<Int>()
+        val normalizedTarget = FileUtil.toSystemIndependentName(filePath)
+        
         traverse(root) { node ->
             when (node) {
                 is BookmarkNode.Bookmark -> {
-                    if (node.filePath == filePath && !seenLines.contains(node.line)) {
+                    val normalizedNodePath = FileUtil.toSystemIndependentName(node.filePath)
+                    if (normalizedNodePath == normalizedTarget && !seenLines.contains(node.line)) {
                         seenLines.add(node.line)
                         markers.add(
                             MarkerEntry(
@@ -104,7 +109,8 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
                 }
                 is BookmarkNode.Process -> {
                     val entryLine = node.entryLine
-                    if (node.entryFilePath == filePath && entryLine != null && !seenLines.contains(entryLine)) {
+                    val normalizedEntryPath = node.entryFilePath?.let { FileUtil.toSystemIndependentName(it) }
+                    if (normalizedEntryPath == normalizedTarget && entryLine != null && !seenLines.contains(entryLine)) {
                         seenLines.add(entryLine)
                         markers.add(
                             MarkerEntry(

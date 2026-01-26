@@ -29,22 +29,23 @@ class BookmarkInlayRenderer(
     private val viewModel: BookmarkViewModel
 ) : InlayPresentation {
 
-    private val icon = AllIcons.Nodes.Bookmark // Use bookmark icon as base
-    private val hoverIcon = AllIcons.General.LinkDropTriangle
+    // Icon is displayed in gutter via BookmarkLineMarkerProvider
+    // Here we also display a small blue info icon at line end, followed by text with remarkInlay style
+    private val icon = AllIcons.General.Information // Blue info icon
     private val text = " $label "
 
     private var isHovered = false
-    private var textStartX = -1
+    private var textStartX = 0
 
     override val width: Int
         get() {
             val font = getFont()
             val metrics = getFontMetrics(font)
-            return metrics.stringWidth(text) + icon.iconWidth + (if (isHovered) hoverIcon.iconWidth else 0)
+            return icon.iconWidth + metrics.charWidth(' ') + metrics.stringWidth(text)
         }
 
     override val height: Int
-        get() = maxOf(icon.iconHeight, hoverIcon.iconHeight, getFontMetrics(getFont()).height)
+        get() = maxOf(icon.iconHeight, getFontMetrics(getFont()).height)
 
     override fun paint(g: Graphics2D, attributes: TextAttributes) {
         if (label.isBlank()) return
@@ -57,21 +58,19 @@ class BookmarkInlayRenderer(
         val metrics = getFontMetrics(font)
 
         var curX = 0
-        textStartX = curX
-
-        // Draw icon
+        
+        // Draw blue info icon
         icon.paintIcon(editor.component, g, curX, getIconY(icon))
         curX += icon.iconWidth + metrics.charWidth(' ')
-
-        // Draw text
+        
+        // Draw text with remarkInlay style
+        textStartX = curX
         g.color = inlineAttributes.foregroundColor
         g.drawString(text, curX, getTextY(metrics))
-        curX += metrics.stringWidth(text)
-
-        // Draw hover icon
-        if (isHovered) {
-            hoverIcon.paintIcon(editor.component, g, curX, getIconY(hoverIcon))
-        }
+    }
+    
+    private fun getIconY(icon: Icon): Int {
+        return (height - icon.iconHeight) / 2
     }
 
     override fun mouseClicked(event: MouseEvent, translated: Point) {
@@ -164,10 +163,6 @@ class BookmarkInlayRenderer(
         }
     }
 
-    private fun getIconY(icon: Icon): Int {
-        return (height - icon.iconHeight) / 2
-    }
-
     private fun getTextY(metrics: FontMetrics): Int {
         return metrics.ascent
     }
@@ -183,7 +178,8 @@ class BookmarkInlayRenderer(
 
     private fun getAttributes(): TextAttributes? {
         val colorsScheme = editor.colorsScheme
-        return colorsScheme.getAttributes(TextAttributesKey.find("INLAY_DEFAULT"))
+        // Use remarkInlay style (similar to CodeReadingMarkNotePro)
+        return colorsScheme.getAttributes(BookmarkInlayTextAttributes.REMARK_INLAY)
     }
 
     override fun fireSizeChanged(previous: Dimension, current: Dimension) {
