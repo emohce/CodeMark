@@ -27,12 +27,8 @@
             id="CodeRemarkTour"
             displayType="BALLOON"
             isLogByDefault="true"/>
-        <codeInsight.lineMarkerProvider
-            language="JAVA"
-            implementationClass="emohce.presentation.editor.gutter.BookmarkLineMarkerProvider"/>
-        <codeInsight.lineMarkerProvider
-            language="kotlin"
-            implementationClass="emohce.presentation.editor.gutter.BookmarkLineMarkerProvider"/>
+        <!-- LineMarkerProvider removed: using IntelliJ built-in BookmarksManager API instead -->
+        <!-- This ensures gutter icons are displayed automatically -->
         <codeInsight.inlayProvider
             language="JAVA"
             implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
