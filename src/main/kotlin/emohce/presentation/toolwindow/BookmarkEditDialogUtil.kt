@@ -1,10 +1,12 @@
 package emohce.presentation.toolwindow
 
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
 import com.intellij.util.ui.FormBuilder
 import emohce.domain.model.BookmarkNode
 import java.io.File
+import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JTextArea
@@ -26,7 +28,7 @@ object BookmarkEditDialogUtil {
             .addLabeledComponent("Column", columnField)
             .panel
 
-        if (!showPanelOkCancel(panel, "Edit Bookmark")) return null
+        if (!showPanelOkCancel(project, panel, "Edit Bookmark")) return null
         val path = pathField.text.trim()
         if (!ensureFileExists(path, "Edit Bookmark")) return null
         val line = (lineField.text.trim().toIntOrNull() ?: node.line).coerceAtLeast(0)
@@ -50,7 +52,7 @@ object BookmarkEditDialogUtil {
             .addLabeledComponent("Markdown", JScrollPane(markdownField))
             .panel
 
-        if (!showPanelOkCancel(panel, "Edit Description")) return null
+        if (!showPanelOkCancel(project, panel, "Edit Description")) return null
         return node.copy(
             name = nameField.text.trim(),
             description = descField.text.trim(),
@@ -66,7 +68,7 @@ object BookmarkEditDialogUtil {
             .addLabeledComponent("Description", descField)
             .panel
 
-        if (!showPanelOkCancel(panel, "Edit Group")) return null
+        if (!showPanelOkCancel(project, panel, "Edit Group")) return null
         return node.copy(name = nameField.text.trim(), description = descField.text.trim())
     }
 
@@ -82,7 +84,7 @@ object BookmarkEditDialogUtil {
             .addLabeledComponent("Entry line", entryLineField)
             .panel
 
-        if (!showPanelOkCancel(panel, "Edit Process")) return null
+        if (!showPanelOkCancel(project, panel, "Edit Process")) return null
         val entryPath = entryPathField.text.trim().ifBlank { null }
         if (!entryPath.isNullOrBlank() && !ensureFileExists(entryPath, "Edit Process")) return null
         val entryLine = entryLineField.text.trim().toIntOrNull()
@@ -94,9 +96,16 @@ object BookmarkEditDialogUtil {
         )
     }
 
-    private fun showPanelOkCancel(panel: JPanel, title: String): Boolean {
-        val result = Messages.showOkCancelDialog(panel, title, "Edit", Messages.getOkButton(), Messages.getCancelButton(), null)
-        return result == Messages.OK
+    private fun showPanelOkCancel(project: Project, panel: JPanel, title: String): Boolean {
+        val dialog = object : DialogWrapper(project) {
+            init {
+                this.title = title
+                init()
+            }
+
+            override fun createCenterPanel(): JComponent = panel
+        }
+        return dialog.showAndGet()
     }
 
     private fun ensureFileExists(path: String, title: String): Boolean {
