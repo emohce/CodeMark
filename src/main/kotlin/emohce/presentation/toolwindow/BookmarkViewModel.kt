@@ -67,10 +67,18 @@ class BookmarkViewModel(
     }
 
     fun processIntent(intent: BookmarkIntent) {
+        logger.info("[PROCESS_INTENT] Received intent: ${intent.javaClass.simpleName}")
         scope.launch {
-            when (intent) {
-                is BookmarkIntent.SelectNode -> handleSelectNode(intent.nodeId)
-                is BookmarkIntent.CreateBookmark -> handleCreateBookmark(intent.parentId, intent.bookmark, intent.insertIndex)
+            try {
+                when (intent) {
+                    is BookmarkIntent.SelectNode -> {
+                        logger.info("[PROCESS_INTENT] Handling SelectNode: nodeId=${intent.nodeId}")
+                        handleSelectNode(intent.nodeId)
+                    }
+                    is BookmarkIntent.CreateBookmark -> {
+                        logger.info("[PROCESS_INTENT] Handling CreateBookmark: nodeId=${intent.bookmark.uuid}, filePath=${intent.bookmark.filePath}, line=${intent.bookmark.line}")
+                        handleCreateBookmark(intent.parentId, intent.bookmark, intent.insertIndex)
+                    }
                 is BookmarkIntent.CreateGroup -> handleCreateGroup(intent.parentId, intent.group, intent.insertIndex)
                 is BookmarkIntent.CreateProcess -> handleCreateProcess(intent.parentId, intent.process, intent.insertIndex)
                 is BookmarkIntent.CreateDescriptive -> handleCreateDescriptive(intent.parentId, intent.note, intent.insertIndex)
@@ -87,7 +95,13 @@ class BookmarkViewModel(
                 is BookmarkIntent.ClearSearch -> handleClearSearch()
                 is BookmarkIntent.ExpandNode -> handleExpandNode(intent.nodeId)
                 is BookmarkIntent.CollapseNode -> handleCollapseNode(intent.nodeId)
-                is BookmarkIntent.Refresh -> loadBookmarks()
+                is BookmarkIntent.Refresh -> {
+                        logger.info("[PROCESS_INTENT] Handling Refresh")
+                        loadBookmarks()
+                    }
+                }
+            } catch (e: Exception) {
+                logger.error("[PROCESS_INTENT] Error handling intent ${intent.javaClass.simpleName}: ${e.message}", e)
             }
         }
     }
@@ -97,25 +111,36 @@ class BookmarkViewModel(
     }
 
     private suspend fun reloadBookmarks() {
+        logger.info("[RELOAD_BOOKMARKS] Step 1: Starting reload...")
         _state.update { it.copy(isLoading = true, error = null) }
         try {
             // 如果 repository 支持重新加载，先重新加载数据
             if (bookmarkRepository is emohce.data.repository.BookmarkRepositoryImpl) {
+                logger.info("[RELOAD_BOOKMARKS] Step 2: Reloading store...")
                 withContext(dispatchers.io) {
                     (bookmarkRepository as emohce.data.repository.BookmarkRepositoryImpl).getStore().reload()
                 }
+                logger.info("[RELOAD_BOOKMARKS] Step 3: Store reloaded")
             }
             
+            logger.info("[RELOAD_BOOKMARKS] Step 4: Getting root node...")
             val root = withContext(dispatchers.io) {
                 bookmarkRepository.getRootNode()
             }
+            logger.info("[RELOAD_BOOKMARKS] Step 5: Root node retrieved, uuid=${root.uuid}")
+            
+            logger.info("[RELOAD_BOOKMARKS] Step 6: Getting references...")
             val references = withContext(dispatchers.io) {
                 referenceRepository.getAllReferences()
             }
+            logger.info("[RELOAD_BOOKMARKS] Step 7: References retrieved, count=${references.size}")
+            
             val counts = references.groupingBy { it.sourceId }.eachCount()
             val targets = references.map { it.targetId }.toSet()
             val targetsBySource = references.groupBy({ it.sourceId }, { it.targetId })
             val sourcesByTarget = references.groupBy({ it.targetId }, { it.sourceId })
+            
+            logger.info("[RELOAD_BOOKMARKS] Step 8: Updating state...")
             _state.update {
                 it.copy(
                     rootNode = root,
@@ -126,7 +151,9 @@ class BookmarkViewModel(
                     referenceSourcesByTarget = sourcesByTarget
                 )
             }
+            logger.info("[RELOAD_BOOKMARKS] Step 9: State updated, reload complete")
         } catch (e: Exception) {
+            logger.error("[RELOAD_BOOKMARKS] Error: ${e.message}", e)
             _state.update { it.copy(error = e.message, isLoading = false) }
         }
     }
@@ -234,12 +261,26 @@ class BookmarkViewModel(
     }
 
     private suspend fun handleCreateBookmark(parentId: String?, bookmark: BookmarkNode.Bookmark, insertIndex: Int?) {
+        logger.info("=== [CREATE_BOOKMARK_START] ===")
+        logger.info("[CREATE_BOOKMARK] Step 1: Creating bookmark - nodeId=${bookmark.uuid}, filePath=${bookmark.filePath}, line=${bookmark.line}, parentId=$parentId, insertIndex=$insertIndex")
+        
         bookmarkRepository.create(bookmark, parentId, insertIndex)
+        logger.info("[CREATE_BOOKMARK] Step 2: Bookmark created in repository - nodeId=${bookmark.uuid}")
+        
+        logger.info("[CREATE_BOOKMARK] Step 3: Reloading bookmarks...")
         reloadBookmarks()
+        logger.info("[CREATE_BOOKMARK] Step 4: Bookmarks reloaded")
+        
+        logger.info("[CREATE_BOOKMARK] Step 5: Emitting SelectNode side effect - nodeId=${bookmark.uuid}")
         _sideEffects.emit(BookmarkSideEffect.SelectNode(bookmark.uuid))
+        
+        logger.info("[CREATE_BOOKMARK] Step 6: Emitting RefreshInlays side effect - filePath=${bookmark.filePath}")
         _sideEffects.emit(BookmarkSideEffect.RefreshInlays(bookmark.filePath))
-        // 通知文档监听器书签已变化
+        
+        logger.info("[CREATE_BOOKMARK] Step 7: Notifying document listener - filePath=${bookmark.filePath}")
         documentListener?.onBookmarksChanged(bookmark.filePath)
+        
+        logger.info("=== [CREATE_BOOKMARK_END] ===")
     }
 
     private suspend fun handleCreateGroup(parentId: String?, group: BookmarkNode.Group, insertIndex: Int?) {

@@ -20,6 +20,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.WriteIntentReadAction
+import com.intellij.psi.PsiDocumentManager
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
@@ -568,13 +569,84 @@ class BookmarkPanel(
         tree.requestFocusInWindow()
     }
 
-    private fun selectNodeById(nodeId: String) {
+    private fun selectNodeById(nodeId: String): Boolean {
         logger.info("selectNodeById: searching for nodeId=$nodeId")
         val success = BookmarkTreeUtil.selectNodeById(tree, treeModel, nodeId)
         if (!success) {
             logger.warn("selectNodeById: node not found for nodeId=$nodeId")
         } else {
-            logger.info("selectNodeById: completed")
+            logger.info("selectNodeById: completed successfully")
+        }
+        return success
+    }
+    
+    /**
+     * 带重试机制的节点选择
+     * 因为树更新可能是异步的，需要等待树更新完成后再选择节点
+     */
+    private fun selectNodeWithRetry(nodeId: String, maxRetries: Int = 5, delayMs: Long = 100) {
+        logger.info("[SELECT_NODE_RETRY] Starting selectNodeWithRetry for nodeId=$nodeId, maxRetries=$maxRetries")
+        var attempt = 0
+        
+        fun trySelect() {
+            attempt++
+            logger.info("[SELECT_NODE_RETRY] Attempt $attempt/$maxRetries")
+            
+            // 设置标志，防止触发导航
+            isSelectingFromSideEffect = true
+            
+            val success = selectNodeById(nodeId)
+            
+            if (success) {
+                logger.info("[SELECT_NODE_RETRY] Node selected successfully on attempt $attempt")
+                
+                // 确保展开到节点路径，包括所有父节点
+                tree.selectionPath?.let { path ->
+                    logger.info("[SELECT_NODE_RETRY] Expanding path for nodeId=$nodeId")
+                    // 展开路径上的所有节点，从当前节点向上到根节点
+                    var currentPath: TreePath? = path
+                    while (currentPath != null && currentPath.pathCount > 0) {
+                        try {
+                            tree.expandPath(currentPath)
+                            val parent = currentPath.parentPath
+                            if (parent == null || parent.pathCount == 0) {
+                                // 到达根节点，停止展开
+                                break
+                            }
+                            currentPath = parent
+                        } catch (e: Exception) {
+                            logger.warn("[SELECT_NODE_RETRY] Error expanding path: ${e.message}", e)
+                            break
+                        }
+                    }
+                    tree.scrollPathToVisible(path)
+                } ?: logger.warn("[SELECT_NODE_RETRY] tree.selectionPath is null after selectNodeById")
+                
+                // 在下一个事件循环中清除标志
+                javax.swing.SwingUtilities.invokeLater {
+                    logger.info("[SELECT_NODE_RETRY] Clearing isSelectingFromSideEffect flag")
+                    isSelectingFromSideEffect = false
+                }
+            } else {
+                if (attempt < maxRetries) {
+                    logger.info("[SELECT_NODE_RETRY] Node not found, will retry in ${delayMs}ms (attempt $attempt/$maxRetries)")
+                    // 使用 Timer 延迟重试，避免阻塞 EDT
+                    javax.swing.Timer(delayMs.toInt()) {
+                        trySelect()
+                    }.apply {
+                        isRepeats = false
+                        start()
+                    }
+                } else {
+                    logger.warn("[SELECT_NODE_RETRY] Node not found after $maxRetries attempts, giving up")
+                    isSelectingFromSideEffect = false
+                }
+            }
+        }
+        
+        // 首次尝试延迟执行，确保树更新完成
+        javax.swing.SwingUtilities.invokeLater {
+            trySelect()
         }
     }
 
@@ -1570,71 +1642,93 @@ class BookmarkPanel(
             is BookmarkSideEffect.ShowNotification -> notify(effect.message, effect.type)
             is BookmarkSideEffect.ScrollToSelected -> Unit
             is BookmarkSideEffect.SelectNode -> {
-                logger.info("SelectNode side effect received: nodeId=${effect.nodeId}")
+                logger.info("[SELECT_NODE] Side effect received: nodeId=${effect.nodeId}")
                 SelectionBus.getInstance(project).setLastSelectedNodeId(effect.nodeId)
-                // 使用 invokeLater 延迟执行，确保树结构已经更新完成
-                javax.swing.SwingUtilities.invokeLater {
-                    logger.info("SelectNode invokeLater callback started, setting isSelectingFromSideEffect=true")
-                    // 设置标志，防止触发导航
-                    isSelectingFromSideEffect = true
-                    logger.info("Calling selectNodeById for nodeId=${effect.nodeId}")
-                    selectNodeById(effect.nodeId)
-                    // TreeSelectionListener 是同步执行的，所以 selectNodeById 之后会立即执行
-                    // 此时 isSelectingFromSideEffect 是 true，所以不会执行导航
-                    logger.info("selectNodeById completed, TreeSelectionListener should have been triggered")
-                    
-                    // 确保展开到节点路径，包括所有父节点
-                    tree.selectionPath?.let { path ->
-                        logger.info("Expanding path for nodeId=${effect.nodeId}")
-                        // 展开路径上的所有节点，从当前节点向上到根节点
-                        var currentPath: TreePath? = path
-                        while (currentPath != null && currentPath.pathCount > 0) {
-                            try {
-                                tree.expandPath(currentPath)
-                                val parent = currentPath.parentPath
-                                if (parent == null || parent.pathCount == 0) {
-                                    // 到达根节点，停止展开
-                                    break
-                                }
-                                currentPath = parent
-                            } catch (e: Exception) {
-                                logger.warn("Error expanding path: ${e.message}", e)
-                                break
-                            }
-                        }
-                        tree.scrollPathToVisible(path)
-                    } ?: logger.warn("tree.selectionPath is null after selectNodeById")
-                    
-                    // 在下一个事件循环中清除标志，确保后续用户点击能够正常执行导航
-                    // 由于 TreeSelectionListener 是同步执行的，此时已经处理完了
-                    javax.swing.SwingUtilities.invokeLater {
-                        logger.info("Clearing isSelectingFromSideEffect flag (current value=$isSelectingFromSideEffect)")
-                        isSelectingFromSideEffect = false
-                        logger.info("isSelectingFromSideEffect flag cleared")
-                    }
-                }
+                // 使用重试机制，因为树更新可能是异步的
+                selectNodeWithRetry(effect.nodeId, maxRetries = 5, delayMs = 100)
             }
             is BookmarkSideEffect.RefreshInlays -> {
+                logger.info("[REFRESH_INLAYS] Step 1: Starting refresh for filePath=${effect.filePath}")
                 val normalizedPath = FileUtil.toSystemIndependentName(effect.filePath)
-                val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath) ?: return
+                logger.info("[REFRESH_INLAYS] Step 2: Normalized path=$normalizedPath")
                 
-                // 使用 ReadAction 访问 PSI
+                val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath)
+                if (file == null) {
+                    logger.warn("[REFRESH_INLAYS] Step 3: File not found, normalizedPath=$normalizedPath")
+                    return
+                }
+                logger.info("[REFRESH_INLAYS] Step 3: File found, path=${file.path}")
+                
+                // 清除 LineMarkerProvider 缓存，强制重新收集
+                // 注意：Provider 可能尚未初始化（延迟加载），这是正常情况
+                logger.info("[REFRESH_INLAYS] Step 4: Attempting to clear LineMarkerProvider cache...")
+                try {
+                    val providerInstance = emohce.presentation.editor.gutter.BookmarkLineMarkerProvider.getInstance()
+                    if (providerInstance != null) {
+                        logger.info("[REFRESH_INLAYS] Step 4.1: Found BookmarkLineMarkerProvider instance, clearing cache for file=$normalizedPath")
+                        emohce.presentation.editor.gutter.BookmarkLineMarkerProvider.clearCache(normalizedPath)
+                        logger.info("[REFRESH_INLAYS] Step 4.2: Cache cleared successfully")
+                    } else {
+                        logger.info("[REFRESH_INLAYS] Step 4.1: BookmarkLineMarkerProvider not initialized yet (normal for lazy loading). Daemon restart will trigger provider initialization.")
+                    }
+                } catch (e: Exception) {
+                    logger.warn("[REFRESH_INLAYS] Step 4: Exception while clearing cache: ${e.message}. Will proceed with daemon restart.", e)
+                }
+                
+                // 使用 ReadAction 访问 PSI 并重启 daemon
+                // Daemon 重启会触发所有 LineMarkerProvider 重新收集标记（包括未初始化的 provider）
+                logger.info("[REFRESH_INLAYS] Step 5: Executing ReadAction to restart daemon...")
                 ReadAction.run<Nothing> {
                     val psiFile = PsiManager.getInstance(project).findFile(file)
-                    val analyzer = DaemonCodeAnalyzer.getInstance(project)
-                    FileEditorManager.getInstance(project)
-                        .getEditors(file)
-                        .forEach { editor ->
-                            (editor as? TextEditor)?.editor?.let { textEditor ->
-                                ParameterHintsPassFactory.forceHintsUpdateOnNextPass(textEditor)
-                            }
-                        }
+                    logger.info("[REFRESH_INLAYS] Step 6: PSI file found=${psiFile != null}, file path=${file.path}")
+                    
                     if (psiFile != null) {
+                        // 确保文档已提交，以便 PSI 是最新的
+                        val document = PsiDocumentManager.getInstance(project).getDocument(psiFile)
+                        if (document != null) {
+                            logger.info("[REFRESH_INLAYS] Step 6.1: Committing document to ensure PSI is up to date")
+                            PsiDocumentManager.getInstance(project).commitDocument(document)
+                        }
+                    }
+                    
+                    val analyzer = DaemonCodeAnalyzer.getInstance(project)
+                    val editors = FileEditorManager.getInstance(project).getEditors(file)
+                    logger.info("[REFRESH_INLAYS] Step 7: Found ${editors.size} open editor(s) for file")
+                    
+                    editors.forEach { editor ->
+                        (editor as? TextEditor)?.editor?.let { textEditor ->
+                            logger.info("[REFRESH_INLAYS] Step 8: Forcing hints update for editor")
+                            ParameterHintsPassFactory.forceHintsUpdateOnNextPass(textEditor)
+                        }
+                    }
+                    
+                    if (psiFile != null) {
+                        logger.info("[REFRESH_INLAYS] Step 9: Restarting daemon for specific file: ${psiFile.name}")
                         analyzer.restart(psiFile)
                     } else {
+                        logger.info("[REFRESH_INLAYS] Step 9: PSI file not found, restarting daemon for all files")
                         analyzer.restart()
                     }
                 }
+                
+                // 在 EDT 上延迟执行，确保 daemon 重启完成后再触发一次刷新
+                // 使用 ApplicationManager.invokeLater 确保在正确的线程上执行
+                ApplicationManager.getApplication().invokeLater({
+                    logger.info("[REFRESH_INLAYS] Step 10: Invoking later to ensure daemon restart is processed")
+                    ReadAction.run<Nothing> {
+                        val psiFile = PsiManager.getInstance(project).findFile(file)
+                        if (psiFile != null) {
+                            val analyzer = DaemonCodeAnalyzer.getInstance(project)
+                            logger.info("[REFRESH_INLAYS] Step 10.1: Triggering additional daemon restart for gutter icons")
+                            // 使用 restart 方法，确保 LineMarkerProvider 被调用
+                            analyzer.restart(psiFile)
+                        } else {
+                            logger.warn("[REFRESH_INLAYS] Step 10.1: PSI file is null, cannot restart daemon")
+                        }
+                    }
+                }, com.intellij.openapi.application.ModalityState.NON_MODAL)
+                
+                logger.info("[REFRESH_INLAYS] Step 11: Daemon restart completed. Provider will be initialized and collect markers on next analysis pass.")
             }
             is BookmarkSideEffect.RefreshBookmarkxJson -> {
                 // 刷新打开的 bookmarkx.json 文件编辑器

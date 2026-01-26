@@ -1,5 +1,6 @@
 package emohce.presentation.toolwindow.panel.util
 
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.ui.treeStructure.Tree
 import emohce.domain.model.BookmarkNode
 import emohce.presentation.toolwindow.panel.BookmarkPanel.NodeView
@@ -13,6 +14,7 @@ import javax.swing.tree.TreePath
  * 封装树节点的查找、选择、展开等常用操作，提高代码可维护性和复用性。
  */
 object BookmarkTreeUtil {
+    private val logger = Logger.getInstance(BookmarkTreeUtil::class.java)
     
     private const val PLACEHOLDER_LABEL = "Loading..."
 
@@ -24,14 +26,26 @@ object BookmarkTreeUtil {
      * @return 找到的节点，如果不存在则返回 null
      */
     fun findNodeById(root: DefaultMutableTreeNode, nodeId: String): DefaultMutableTreeNode? {
-        val view = root.userObject as? NodeView
-        if (view?.node?.uuid == nodeId) return root
+        return findNodeByIdInternal(root, nodeId, 0)
+    }
+    
+    private fun findNodeByIdInternal(node: DefaultMutableTreeNode, nodeId: String, depth: Int): DefaultMutableTreeNode? {
+        val view = node.userObject as? NodeView
+        val currentNodeId = view?.node?.uuid
+        if (currentNodeId == nodeId) {
+            logger.debug("[TREE_FIND] Found node at depth=$depth, nodeId=$nodeId")
+            return node
+        }
         
-        val children = root.children()
-        while (children.hasMoreElements()) {
-            val child = children.nextElement() as? DefaultMutableTreeNode ?: continue
-            val match = findNodeById(child, nodeId)
-            if (match != null) return match
+        val childCount = node.childCount
+        if (childCount > 0) {
+            logger.debug("[TREE_FIND] Checking node at depth=$depth, currentNodeId=$currentNodeId, childCount=$childCount")
+            val children = node.children()
+            while (children.hasMoreElements()) {
+                val child = children.nextElement() as? DefaultMutableTreeNode ?: continue
+                val match = findNodeByIdInternal(child, nodeId, depth + 1)
+                if (match != null) return match
+            }
         }
         return null
     }
@@ -65,14 +79,45 @@ object BookmarkTreeUtil {
      * @return 是否成功选择节点
      */
     fun selectNodeById(tree: Tree, treeModel: DefaultTreeModel, nodeId: String): Boolean {
-        val root = treeModel.root as? DefaultMutableTreeNode ?: return false
-        val node = findNodeById(root, nodeId) ?: return false
+        logger.info("[TREE_SELECT] Starting selectNodeById for nodeId=$nodeId")
+        val root = treeModel.root as? DefaultMutableTreeNode
+        if (root == null) {
+            logger.warn("[TREE_SELECT] Root is null")
+            return false
+        }
         
+        val rootView = root.userObject as? NodeView
+        logger.info("[TREE_SELECT] Root nodeId=${rootView?.node?.uuid}, root childCount=${root.childCount}")
+        
+        val node = findNodeById(root, nodeId)
+        if (node == null) {
+            logger.warn("[TREE_SELECT] Node not found in tree for nodeId=$nodeId")
+            // 尝试列出所有节点ID以便调试
+            logger.info("[TREE_SELECT] Listing all node IDs in tree:")
+            listAllNodeIds(root, 0)
+            return false
+        }
+        
+        logger.info("[TREE_SELECT] Node found, creating TreePath...")
         val path = TreePath(node.path)
         tree.selectionPath = path
         tree.expandPath(path)
         tree.scrollPathToVisible(path)
+        logger.info("[TREE_SELECT] Node selected successfully")
         return true
+    }
+    
+    private fun listAllNodeIds(node: DefaultMutableTreeNode, depth: Int) {
+        val view = node.userObject as? NodeView
+        val nodeId = view?.node?.uuid
+        val indent = "  ".repeat(depth)
+        logger.info("$indent- nodeId=$nodeId, type=${view?.node?.javaClass?.simpleName}, childCount=${node.childCount}")
+        
+        val children = node.children()
+        while (children.hasMoreElements()) {
+            val child = children.nextElement() as? DefaultMutableTreeNode ?: continue
+            listAllNodeIds(child, depth + 1)
+        }
     }
 
     /**

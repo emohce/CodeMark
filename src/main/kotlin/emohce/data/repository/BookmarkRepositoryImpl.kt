@@ -1,5 +1,6 @@
 package emohce.data.repository
 
+import com.intellij.openapi.diagnostic.Logger
 import emohce.domain.event.BookmarkEvent
 import emohce.domain.model.BookmarkNode
 import emohce.domain.repository.BookmarkRepository
@@ -10,6 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.ConcurrentHashMap
 
 class BookmarkRepositoryImpl(private val store: BookmarkStore) : BookmarkRepository {
+    private val logger = Logger.getInstance(BookmarkRepositoryImpl::class.java)
     private val changes = MutableSharedFlow<BookmarkEvent>(extraBufferCapacity = 64)
     private val nodeStates = ConcurrentHashMap<String, MutableStateFlow<BookmarkNode?>>()
     
@@ -50,10 +52,22 @@ class BookmarkRepositoryImpl(private val store: BookmarkStore) : BookmarkReposit
     }
 
     override suspend fun create(node: BookmarkNode, parentId: String?, index: Int?) {
+        logger.info("[REPO_CREATE] Step 1: Creating node - uuid=${node.uuid}, type=${node.javaClass.simpleName}, parentId=$parentId, index=$index")
+        if (node is BookmarkNode.Bookmark) {
+            logger.info("[REPO_CREATE] Bookmark details: filePath=${node.filePath}, line=${node.line}, column=${node.column}, name=${node.name}")
+        }
+        
         val root = insertChild(store.root, parentId, node, index)
+        logger.info("[REPO_CREATE] Step 2: Node inserted into tree, root uuid=${root.uuid}")
+        
         store.replaceRoot(root)
+        logger.info("[REPO_CREATE] Step 3: Root replaced in store")
+        
         changes.tryEmit(BookmarkEvent.NodeAdded(node, parentId, index ?: -1))
+        logger.info("[REPO_CREATE] Step 4: NodeAdded event emitted")
+        
         notifyObserved(node.uuid)
+        logger.info("[REPO_CREATE] Step 5: Node state notified, create complete")
     }
 
     override suspend fun update(node: BookmarkNode) {
