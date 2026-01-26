@@ -31,6 +31,7 @@ import emohce.presentation.toolwindow.BookmarkSideEffect
 import emohce.presentation.toolwindow.BookmarkViewModel
 import emohce.presentation.toolwindow.BookmarkViewState
 import emohce.presentation.toolwindow.panel.render.BookmarkTreeCellRenderer
+import emohce.presentation.toolwindow.panel.util.BookmarkTreeUtil
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -397,7 +398,7 @@ class BookmarkPanel(
                     )
                 }
             } else {
-                treeNode.add(createPlaceholderNode())
+                treeNode.add(BookmarkTreeUtil.createPlaceholderNode())
             }
         }
         return treeNode
@@ -461,7 +462,7 @@ class BookmarkPanel(
     private fun insertionTarget(): Pair<String?, Int?> {
         val root = treeModel.root as? DefaultMutableTreeNode ?: return "root" to null
         val lastSelectedId = SelectionBus.getInstance(project).getLastSelectedNodeId()
-        val selectedTreeNode = lastSelectedId?.let { findNodeById(root, it) }
+        val selectedTreeNode = lastSelectedId?.let { BookmarkTreeUtil.findNodeById(root, it) }
         val selectedView = selectedTreeNode?.userObject as? NodeView
         val selectedNode = selectedView?.node
 
@@ -487,7 +488,7 @@ class BookmarkPanel(
 
     private fun realChildCount(node: DefaultMutableTreeNode?): Int {
         if (node == null) return 0
-        if (hasPlaceholder(node)) return 0
+        if (BookmarkTreeUtil.hasPlaceholder(node)) return 0
         return node.childCount
     }
 
@@ -569,31 +570,19 @@ class BookmarkPanel(
 
     private fun selectNodeById(nodeId: String) {
         logger.info("selectNodeById: searching for nodeId=$nodeId")
-        val root = treeModel.root as? DefaultMutableTreeNode
-        if (root == null) {
-            logger.warn("selectNodeById: treeModel.root is null")
-            return
-        }
-        val node = findNodeById(root, nodeId)
-        if (node == null) {
+        val success = BookmarkTreeUtil.selectNodeById(tree, treeModel, nodeId)
+        if (!success) {
             logger.warn("selectNodeById: node not found for nodeId=$nodeId")
-            return
+        } else {
+            logger.info("selectNodeById: completed")
         }
-        logger.info("selectNodeById: node found, creating TreePath")
-        val path = TreePath(node.path)
-        logger.info("selectNodeById: setting selection path, pathCount=${path.pathCount}")
-        tree.selectionPath = path
-        logger.info("selectNodeById: selection path set, current selectionPath=${tree.selectionPath != null}")
-        tree.expandPath(path)
-        tree.scrollPathToVisible(path)
-        logger.info("selectNodeById: completed")
     }
 
     private fun restoreExpandedNodes(expandedIds: Set<String>) {
         val root = treeModel.root as? DefaultMutableTreeNode ?: return
         expandedIds.forEach { id ->
-            val node = findNodeById(root, id) ?: return@forEach
-            val view = node.userObject as? NodeView
+            val node = BookmarkTreeUtil.findNodeById(root, id) ?: return@forEach
+            val view = BookmarkTreeUtil.getNodeView(node)
             if (view != null) {
                 populateChildren(node, view.node)
             }
@@ -602,20 +591,8 @@ class BookmarkPanel(
         }
     }
 
-    private fun findNodeById(root: DefaultMutableTreeNode, nodeId: String): DefaultMutableTreeNode? {
-        val view = root.userObject as? NodeView
-        if (view?.node?.uuid == nodeId) return root
-        val children = root.children()
-        while (children.hasMoreElements()) {
-            val child = children.nextElement() as DefaultMutableTreeNode
-            val match = findNodeById(child, nodeId)
-            if (match != null) return match
-        }
-        return null
-    }
-
     private fun populateChildren(treeNode: DefaultMutableTreeNode, node: BookmarkNode) {
-        if (!hasPlaceholder(treeNode)) return
+        if (!BookmarkTreeUtil.hasPlaceholder(treeNode)) return
         treeNode.removeAllChildren()
         val children = when (node) {
             is BookmarkNode.Group -> node.children
@@ -638,15 +615,6 @@ class BookmarkPanel(
         treeModel.nodeStructureChanged(treeNode)
     }
 
-    private fun hasPlaceholder(node: DefaultMutableTreeNode): Boolean {
-        if (node.childCount != 1) return false
-        val child = node.getChildAt(0) as? DefaultMutableTreeNode ?: return false
-        return child.userObject == PLACEHOLDER_LABEL
-    }
-
-    private fun createPlaceholderNode(): DefaultMutableTreeNode {
-        return DefaultMutableTreeNode(PLACEHOLDER_LABEL)
-    }
 
     private fun buildPathLabel(node: BookmarkNode): String {
         return currentPathMap[node.uuid] ?: "Root/${node.name.ifBlank { "(unnamed)" }}"
@@ -657,7 +625,7 @@ class BookmarkPanel(
         current: DefaultMutableTreeNode,
         updated: DefaultMutableTreeNode
     ): Boolean {
-        if (nodeKey(current) != nodeKey(updated)) return false
+        if (BookmarkTreeUtil.nodeKey(current) != BookmarkTreeUtil.nodeKey(updated)) return false
 
         // 更新当前节点的 userObject（NodeView），确保节点数据是最新的
         val currentView = current.userObject as? NodeView
@@ -672,17 +640,17 @@ class BookmarkPanel(
             }
         }
 
-        val existingChildren = nodeChildren(current)
-        val existingMap = existingChildren.associateBy { nodeKey(it) }.toMutableMap()
+        val existingChildren = BookmarkTreeUtil.nodeChildren(current)
+        val existingMap = existingChildren.associateBy { BookmarkTreeUtil.nodeKey(it) }.toMutableMap()
         val desiredKeys = mutableListOf<String>()
 
-        val updatedChildren = nodeChildren(updated)
+        val updatedChildren = BookmarkTreeUtil.nodeChildren(updated)
         updatedChildren.forEachIndexed { index, updatedChild ->
-            val key = nodeKey(updatedChild)
+            val key = BookmarkTreeUtil.nodeKey(updatedChild)
             desiredKeys.add(key)
             val existing = existingMap.remove(key)
             if (existing == null) {
-                val copy = copyNode(updatedChild)
+                val copy = BookmarkTreeUtil.copyNode(updatedChild)
                 model.insertNodeInto(copy, current, index.coerceAtMost(current.childCount))
             } else {
                 applyDiff(model, existing, updatedChild)
@@ -701,37 +669,11 @@ class BookmarkPanel(
         return true
     }
 
-    private fun nodeKey(node: DefaultMutableTreeNode): String {
-        val obj = node.userObject
-        val view = obj as? NodeView
-        return view?.node?.uuid ?: obj?.toString().orEmpty()
-    }
-
-    private fun copyNode(source: DefaultMutableTreeNode): DefaultMutableTreeNode {
-        val copy = DefaultMutableTreeNode(source.userObject)
-        val children = nodeChildren(source)
-        children.forEach { child ->
-            copy.add(copyNode(child))
-        }
-        return copy
-    }
-
-    private fun nodeChildren(node: DefaultMutableTreeNode): List<DefaultMutableTreeNode> {
-        val result = mutableListOf<DefaultMutableTreeNode>()
-        val children = node.children()
-        while (children.hasMoreElements()) {
-            val child = children.nextElement()
-            if (child is DefaultMutableTreeNode) {
-                result.add(child)
-            }
-        }
-        return result
-    }
 
     private fun moveTreeNode(nodeId: String, parentId: String, index: Int) {
         val root = treeModel.root as? DefaultMutableTreeNode ?: return
-        val node = findNodeById(root, nodeId) ?: return
-        val parent = findNodeById(root, parentId) ?: return
+        val node = BookmarkTreeUtil.findNodeById(root, nodeId) ?: return
+        val parent = BookmarkTreeUtil.findNodeById(root, parentId) ?: return
 
         val currentParent = node.parent as? DefaultMutableTreeNode
         if (currentParent != null) {
@@ -1800,9 +1742,6 @@ class BookmarkPanel(
         override fun toString(): String = label
     }
 
-    private companion object {
-        private const val PLACEHOLDER_LABEL = "Loading..."
-    }
 
     override fun dispose() {
         scope.cancel()
