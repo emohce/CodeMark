@@ -7,6 +7,7 @@ import com.intellij.openapi.editor.colors.TextAttributesKey
 import com.intellij.openapi.editor.impl.FontInfo
 import com.intellij.openapi.editor.markup.TextAttributes
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.Messages
 import com.intellij.util.ui.UIUtil
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
@@ -74,8 +75,17 @@ class BookmarkInlayRenderer(
     }
 
     override fun mouseClicked(event: MouseEvent, translated: Point) {
-        if (isHovered) {
-            showEditPopup()
+        if (!isHovered) return
+        
+        when {
+            event.button == MouseEvent.BUTTON1 -> {
+                // Left click: show edit dialog
+                showEditPopup()
+            }
+            event.button == MouseEvent.BUTTON3 || event.isPopupTrigger -> {
+                // Right click: show delete confirmation
+                showDeleteConfirmation()
+            }
         }
     }
 
@@ -109,6 +119,48 @@ class BookmarkInlayRenderer(
 
             // 发送编辑意图，ViewModel 会自动刷新树形结构和 JSON
             viewModel.processIntent(BookmarkIntent.EditNode(updated))
+        }
+    }
+
+    private fun showDeleteConfirmation() {
+        runBlocking {
+            val locator = ServiceLocator(project)
+            val node = locator.bookmarkRepository.findByUuid(nodeId) ?: return@runBlocking
+            
+            if (node.uuid == "root") return@runBlocking
+
+            // Get reference information
+            val allReferences = locator.referenceRepository.getAllReferences()
+            val outgoing = allReferences.count { it.sourceId == nodeId }
+            val incoming = allReferences.count { it.targetId == nodeId }
+
+            // Build warning message
+            val warning = when (node) {
+                is BookmarkNode.Bookmark -> {
+                    when {
+                        outgoing > 0 && incoming > 0 ->
+                            "This bookmark has $outgoing outgoing references and is referenced by $incoming sources. Deleting will remove related references."
+                        outgoing > 0 ->
+                            "This bookmark has $outgoing outgoing references. Deleting will remove related references."
+                        incoming > 0 ->
+                            "This bookmark is referenced by $incoming sources. Deleting will remove related references."
+                        else -> "Delete selected node?"
+                    }
+                }
+                else -> "Delete selected node?"
+            }
+
+            // Show confirmation dialog
+            val confirmed = Messages.showYesNoDialog(
+                project,
+                warning,
+                "Delete",
+                Messages.getQuestionIcon()
+            )
+
+            if (confirmed == Messages.YES) {
+                viewModel.processIntent(BookmarkIntent.DeleteNode(nodeId))
+            }
         }
     }
 
