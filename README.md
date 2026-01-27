@@ -1,109 +1,62 @@
-# IntelliJ Platform Plugin Template
+# CodeRemarkTour
 
-[![Twitter Follow](https://img.shields.io/badge/follow-%40JBPlatform-1DA1F2?logo=twitter)](https://twitter.com/JBPlatform)
-[![Developers Forum](https://img.shields.io/badge/JetBrains%20Platform-Join-blue)][jb:forum]
+结构化书签与流程导航插件，提供工具窗口、gutter/inlay 联动、引用关系与流程步进导航，面向大项目的“代码导览 + 备注”场景。
 
-## Plugin template structure
+## 概要
+- **核心能力**：树形书签（分组/流程/备注）、引用关联、编辑器 gutter 图标与行尾 inlay、流程上一条/下一条导航、选中联动。
+- **数据源**：插件自有 BookmarkStore（本地 JSON），单一事实源；IDE 内置书签同步默认关闭（后续以开关灰度）。
+- **主要入口**：右侧 ToolWindow“CodeRemarkTour”、编辑器右键菜单、快捷键（见下）。
 
-A generated project contains the following content structure:
+## 环境要求
+- IntelliJ IDEA：目标 2025.3，对应 sinceBuild 253.*。
+- Kotlin 2.1.20，Gradle + intellij-platform-gradle-plugin 2.10.2。
+- JDK 21 目标（source/target）。
 
-```
-.
-├── .run/                   Predefined Run/Debug Configurations
-├── build/                  Output build directory
-├── gradle
-│   ├── wrapper/            Gradle Wrapper
-├── src                     Plugin sources
-│   ├── main
-│   │   ├── kotlin/         Kotlin production sources
-│   │   └── resources/      Resources - plugin.xml, icons, messages
-├── .gitignore              Git ignoring rules
-├── build.gradle.kts        Gradle build configuration
-├── gradle.properties       Gradle configuration properties
-├── gradlew                 *nix Gradle Wrapper script
-├── gradlew.bat             Windows Gradle Wrapper script
-├── README.md               README
-└── settings.gradle.kts     Gradle project settings
-```
+## 安装与运行
+- 本地开发：使用 Gradle 任务 `runIde` 运行沙盒；`buildSearchableOptions` 已禁用以减少失败风险。
+- 发布：后续可接入 `publishPlugin`，暂未配置市场发布信息。
 
-In addition to the configuration files, the most crucial part is the `src` directory, which contains our implementation and the manifest for our plugin – [plugin.xml][file:plugin.xml].
+## 快速上手
+- 在编辑器中：
+  - 右键菜单 “Add Bookmark/Group/Process/Note” 创建节点。
+  - Gutter 图标左键选中树节点并（可选）导航，右键菜单执行编辑/删除/引用等操作。
+  - 行尾 inlay 显示节点提示，点击可导航。
+- 在工具窗口：
+  - 树视图支持创建、编辑、删除、移动；流程节点可用上一条/下一条按钮。
+  - 搜索与筛选入口见工具窗口顶部。
 
-> [!NOTE]
-> To use Java in your plugin, create the `/src/main/java` directory.
+快捷键（默认）：
+- Add Bookmark Here: `Shift+F2`
+- Add Process Entry Here: 右键菜单（可自定义）
+- Add Group Here: `Shift+F3`
+- Add Note Here: `Shift+F4`
+- Navigate Next/Prev in Process: `Ctrl+Shift+N` / `Ctrl+Shift+P`
 
-## Plugin configuration file
+## 架构概览
+- **数据存储**：`.bookmarkx/bookmarkx.json` 通过 BookmarkStore 管理。
+- **Repository & UseCase**：`BookmarkRepositoryImpl`、`ReferenceRepositoryImpl`，配合 ProcessNavigation/SyncReferences/DetectCircularRef 等用例。
+- **ViewModel**：`BookmarkViewModel` 基于 StateFlow + SharedFlow 管理状态与副作用。
+- **编辑器集成**：
+  - `BookmarkLineMarkerProvider`（自定义 gutter）
+  - `BookmarkLineEndInlayProvider`（行尾 inlay）
+  - `BookmarkHighlighterService`（高亮与联动）
+- **交互总线**：`SelectionBus` 协调工具窗口与编辑器选中状态。
 
-The plugin configuration file is a [plugin.xml][file:plugin.xml] file located in the `src/main/resources/META-INF` directory.
-It provides general information about the plugin, its dependencies, extensions, and listeners.
+## 已知限制
+- 不提供远端同步、多用户、权限控制。
+- IDE 内置书签同步默认关闭；后续通过配置开关灰度。
+- 性能与大规模数据（1000+ 书签）尚未压测，需补测试。
 
-You can read more about this file in the [Plugin Configuration File][docs:plugin.xml] section of our documentation.
+## 关联文档
+- 重构方案：`./260126-cursor-重构方案.md`
+- 冗余/优化核查：`./260127-cursor-冗余优化核查.md`
+- TODO 进度：`./doc/CODE_REMARK_TOUR_TODO.md`
 
-If you're still not quite sure what this is all about, read our introduction: [What is the IntelliJ Platform?][docs:intro]
+## 开发提示
+- 代码入口：ToolWindow 工厂 `emohce.presentation.toolwindow.CodeRemarkTourToolWindowFactory`，启动活动 `emohce.core.startup.BookmarkStartupActivity`。
+- 插件声明：`./src/main/resources/META-INF/plugin.xml`（待补自定义 lineMarker 注册，内置书签同步开关默认关）。
+- 依赖与构建：`./build.gradle.kts`，JDK 21；如需下调 IDEA 版本请同步 sinceBuild。
+- 内置书签同步开关：项目设置 `BookmarkSettingsService`（默认 false），可通过 Registry `coderemarktour.enableLegacyIntellijSync` 强制开启；`IntelliJBookmarkManager` 标记 @Deprecated。
 
-$H$H Predefined Run/Debug configurations
-
-Within the default project structure, there is a `.run` directory provided containing predefined *Run/Debug configurations* that expose corresponding Gradle tasks:
-
-| Configuration name | Description                                                                                                                                                                         |
-|--------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Run Plugin         | Runs [`:runIde`][gh:intellij-platform-gradle-plugin-runIde] IntelliJ Platform Gradle Plugin task. Use the *Debug* icon for plugin debugging.                                        |
-| Run Tests          | Runs [`:test`][gradle:lifecycle-tasks] Gradle task.                                                                                                                                 |
-| Run Verifications  | Runs [`:verifyPlugin`][gh:intellij-platform-gradle-plugin-verifyPlugin] IntelliJ Platform Gradle Plugin task to check the plugin compatibility against the specified IntelliJ IDEs. |
-
-> [!NOTE]
-> You can find the logs from the running task in the `idea.log` tab.
-
-## Publishing the plugin
-
-> [!TIP]
-> Make sure to follow all guidelines listed in [Publishing a Plugin][docs:publishing] to follow all recommended and required steps.
-
-Releasing a plugin to [JetBrains Marketplace](https://plugins.jetbrains.com) is a straightforward operation that uses the `publishPlugin` Gradle task provided by the [intellij-platform-gradle-plugin][gh:intellij-platform-gradle-plugin-docs].
-
-You can also upload the plugin to the [JetBrains Plugin Repository](https://plugins.jetbrains.com/plugin/upload) manually via UI.
-
-## Useful links
-
-- [IntelliJ Platform SDK Plugin SDK][docs]
-- [IntelliJ Platform Gradle Plugin Documentation][gh:intellij-platform-gradle-plugin-docs]
-- [IntelliJ Platform Explorer][jb:ipe]
-- [JetBrains Marketplace Quality Guidelines][jb:quality-guidelines]
-- [IntelliJ Platform UI Guidelines][jb:ui-guidelines]
-- [JetBrains Marketplace Paid Plugins][jb:paid-plugins]
-- [IntelliJ SDK Code Samples][gh:code-samples]
-
-[docs]: https://plugins.jetbrains.com/docs/intellij
-
-[docs:intro]: https://plugins.jetbrains.com/docs/intellij/intellij-platform.html?from=IJPluginTemplate
-
-[docs:plugin.xml]: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html?from=IJPluginTemplate
-
-[docs:publishing]: https://plugins.jetbrains.com/docs/intellij/publishing-plugin.html?from=IJPluginTemplate
-
-[file:plugin.xml]: ./src/main/resources/META-INF/plugin.xml
-
-[gh:code-samples]: https://github.com/JetBrains/intellij-sdk-code-samples
-
-[gh:intellij-platform-gradle-plugin]: https://github.com/JetBrains/intellij-platform-gradle-plugin
-
-[gh:intellij-platform-gradle-plugin-docs]: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html
-
-[gh:intellij-platform-gradle-plugin-runIde]: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-tasks.html#runIde
-
-[gh:intellij-platform-gradle-plugin-verifyPlugin]: https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-tasks.html#verifyPlugin
-
-[gradle:lifecycle-tasks]: https://docs.gradle.org/current/userguide/java_plugin.html#lifecycle_tasks
-
-[jb:github]: https://github.com/JetBrains/.github/blob/main/profile/README.md
-
-[jb:forum]: https://platform.jetbrains.com/
-
-[jb:quality-guidelines]: https://plugins.jetbrains.com/docs/marketplace/quality-guidelines.html
-
-[jb:paid-plugins]: https://plugins.jetbrains.com/docs/marketplace/paid-plugins-marketplace.html
-
-[jb:quality-guidelines]: https://plugins.jetbrains.com/docs/marketplace/quality-guidelines.html
-
-[jb:ipe]: https://jb.gg/ipe
-
-[jb:ui-guidelines]: https://jetbrains.github.io/ui
+## 变更记录
+- 2026-01-27：重写 README，模板移至 `doc/README-template.md`；确认单一数据源策略，计划恢复自定义 gutter 注册并关闭内置书签同步。

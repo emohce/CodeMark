@@ -18,6 +18,7 @@
 
     <!-- Product and plugin compatibility requirements.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
+    <idea-version since-build="253.*" />
     <depends>com.intellij.modules.platform</depends>
 
     <!-- Extensions defined by the plugin.
@@ -27,8 +28,12 @@
             id="CodeRemarkTour"
             displayType="BALLOON"
             isLogByDefault="true"/>
-        <!-- LineMarkerProvider removed: using IntelliJ built-in BookmarksManager API instead -->
-        <!-- This ensures gutter icons are displayed automatically -->
+        <codeInsight.lineMarkerProvider
+            language="ANY"
+            implementationClass="emohce.presentation.editor.gutter.BookmarkLineMarkerProvider"/>
+        <codeInsight.inlayProvider
+            language="ANY"
+            implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
         <codeInsight.inlayProvider
             language="JAVA"
             implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
