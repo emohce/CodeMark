@@ -1,5 +1,6 @@
 package emohce.presentation.editor
 
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
@@ -13,6 +14,7 @@ import com.intellij.psi.PsiDocumentManager
 import com.intellij.ui.EditorNotifications
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
+import emohce.presentation.editor.gutter.BookmarkLineMarkerProvider
 import emohce.presentation.toolwindow.BookmarkIntent
 import emohce.presentation.toolwindow.BookmarkViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -29,6 +31,7 @@ import javax.swing.SwingUtilities
  * 监听所有打开的文件中有书签的文件，自动更新书签行号
  */
 class BookmarkDocumentListener(private val project: Project) {
+    private val logger = Logger.getInstance(BookmarkDocumentListener::class.java)
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val documentListeners = ConcurrentHashMap<Document, DocumentChangeListener>()
     private val fileBookmarks = ConcurrentHashMap<String, MutableList<BookmarkNode.Bookmark>>()
@@ -67,7 +70,15 @@ class BookmarkDocumentListener(private val project: Project) {
     }
 
     private fun attachListenerToFile(file: VirtualFile) {
-        val document = FileDocumentManager.getInstance().getDocument(file) ?: return
+        // 使用 ReadAction 访问 Document
+        val document = try {
+            com.intellij.openapi.application.ReadAction.compute<com.intellij.openapi.editor.Document?, Throwable> {
+                FileDocumentManager.getInstance().getDocument(file)
+            }
+        } catch (e: Throwable) {
+            logger.debug("Error getting document for file ${file.path}: ${e.message}")
+            return
+        } ?: return
         val filePath = FileUtil.toSystemIndependentName(file.path)
         
         // 检查文件是否有书签

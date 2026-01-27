@@ -46,7 +46,16 @@ class IntelliJBookmarkManager(private val project: Project) {
                 return null
             }
             
-            val document = FileDocumentManager.getInstance().getDocument(file)
+            // 使用 ReadAction 访问 Document
+            val document = try {
+                com.intellij.openapi.application.ReadAction.compute<com.intellij.openapi.editor.Document?, Throwable> {
+                    FileDocumentManager.getInstance().getDocument(file)
+                }
+            } catch (e: Throwable) {
+                logger.error("[INTELLIJ_BOOKMARK] Error getting document: ${e.message}", e)
+                return null
+            }
+            
             if (document == null || bookmark.line >= document.lineCount) {
                 logger.warn("[INTELLIJ_BOOKMARK] Invalid line: ${bookmark.line}, document has ${document?.lineCount} lines")
                 return null

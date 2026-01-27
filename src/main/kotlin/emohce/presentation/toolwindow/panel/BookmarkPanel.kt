@@ -204,7 +204,7 @@ class BookmarkPanel(
         tree.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
                 logger.info("Mouse pressed: button=${e.button}, isPopupTrigger=${e.isPopupTrigger}, clickCount=${e.clickCount}")
-                if (e.isPopupTrigger) selectNodeAt(e)
+                if (e.isPopupTrigger || e.button == MouseEvent.BUTTON1) selectNodeAt(e)
             }
 
             override fun mouseReleased(e: MouseEvent) {
@@ -214,8 +214,12 @@ class BookmarkPanel(
 
             override fun mouseClicked(e: MouseEvent) {
                 logger.info("Mouse clicked: button=${e.button}, clickCount=${e.clickCount}, isSelectingFromSideEffect=$isSelectingFromSideEffect")
-                if (e.clickCount == 2 && e.button == MouseEvent.BUTTON1) {
-                    logger.info("Double click detected, navigating to bookmark")
+                if (e.button == MouseEvent.BUTTON1 && e.clickCount == 1) {
+                    // 保障在节点被删除后重新点击时也能正确选中
+                    if (tree.selectionPath == null) {
+                        selectNodeAt(e)
+                    }
+                    logger.info("Single left click detected, navigating to bookmark")
                     navigateSelectedBookmark()
                 }
             }
@@ -1675,15 +1679,13 @@ class BookmarkPanel(
                     logger.warn("[REFRESH_INLAYS] Step 4: Exception while clearing cache: ${e.message}. Will proceed with daemon restart.", e)
                 }
                 
-                // 使用 ReadAction 访问 PSI 并重启 daemon
-                // Daemon 重启会触发所有 LineMarkerProvider 重新收集标记（包括未初始化的 provider）
-                logger.info("[REFRESH_INLAYS] Step 5: Executing ReadAction to restart daemon...")
-                ReadAction.run<Nothing> {
+                // 使用 WriteIntentReadAction 以满足 commitDocument 的写线程要求
+                logger.info("[REFRESH_INLAYS] Step 5: Executing WriteIntentReadAction to restart daemon...")
+                WriteIntentReadAction.run<Nothing> {
                     val psiFile = PsiManager.getInstance(project).findFile(file)
                     logger.info("[REFRESH_INLAYS] Step 6: PSI file found=${psiFile != null}, file path=${file.path}")
                     
                     if (psiFile != null) {
-                        // 确保文档已提交，以便 PSI 是最新的
                         val document = PsiDocumentManager.getInstance(project).getDocument(psiFile)
                         if (document != null) {
                             logger.info("[REFRESH_INLAYS] Step 6.1: Committing document to ensure PSI is up to date")

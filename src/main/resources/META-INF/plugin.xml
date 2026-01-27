@@ -47,6 +47,7 @@
             icon="/META-INF/pluginIcon.svg"
             anchor="right"
             secondary="false"/>
+        <postStartupActivity implementation="emohce.core.startup.BookmarkStartupActivity"/>
     </extensions>
 
     <actions>

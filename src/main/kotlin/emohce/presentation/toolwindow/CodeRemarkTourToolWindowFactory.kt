@@ -6,7 +6,9 @@ import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.content.ContentFactory
 import emohce.core.di.ServiceLocator
 import emohce.presentation.editor.BookmarkDocumentListener
+import emohce.presentation.editor.bookmark.BookmarkNavigationListener
 import emohce.presentation.toolwindow.panel.BookmarkPanel
+import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 
 class CodeRemarkTourToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
@@ -25,9 +27,15 @@ class CodeRemarkTourToolWindowFactory : ToolWindowFactory {
         val documentListener = BookmarkDocumentListener(project)
         documentListener.setViewModel(viewModel)
         viewModel.setDocumentListener(documentListener)
+        
+        // 初始化书签导航监听器（监听 gutter 图标点击）
+        val bookmarkNavigationListener = BookmarkNavigationListener(project)
 
         val panel = BookmarkPanel(project, viewModel)
         val content = ContentFactory.getInstance().createContent(panel, "", false)
         toolWindow.contentManager.addContent(content)
+
+        // 启动自定义 gutter/highlighter 服务，确保左键联动与自渲染生效
+        BookmarkHighlighterService.getInstance(project).start()
     }
 }

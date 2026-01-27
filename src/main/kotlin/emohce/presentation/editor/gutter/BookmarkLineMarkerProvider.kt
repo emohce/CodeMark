@@ -9,6 +9,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.IconLoader
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiElement
 import com.intellij.util.Function
@@ -82,7 +83,7 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
         elements: MutableList<out PsiElement>,
         result: MutableCollection<in LineMarkerInfo<*>>
     ) {
-        logger.info("[GUTTER_COLLECT] collectSlowLineMarkers: called with ${elements.size} elements")
+        logger.warn("[GUTTER_COLLECT] begin, elements=${elements.size}")
         if (elements.isEmpty()) {
             logger.debug("collectSlowLineMarkers: elements is empty, returning")
             return
@@ -109,7 +110,7 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
         logger.info("collectSlowLineMarkers: file=${virtualFile.path}, lineCount=${document.lineCount}")
         
         val markers = getMarkers(project, virtualFile)
-        logger.info("collectSlowLineMarkers: found ${markers.size} markers for file ${virtualFile.path}")
+        logger.warn("[GUTTER_COLLECT] markers=${markers.size} file=${virtualFile.path}")
         if (markers.isEmpty()) {
             logger.debug("collectSlowLineMarkers: no markers found, returning")
             return
@@ -180,7 +181,10 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
                 elementAtLine.textRange,
                 marker.icon,
                 Function { marker.tooltip },
-                { _, _ -> navigateToLine(project, virtualFile, marker) },
+                { _, _ ->
+                    logger.warn("[GUTTER_CLICK] handler invoked element=${elementAtLine.javaClass.simpleName} line=${marker.line} id=${marker.nodeId}")
+                    navigateToLine(project, virtualFile, marker)
+                },
                 com.intellij.openapi.editor.markup.GutterIconRenderer.Alignment.LEFT,
                 { marker.tooltip }
             )
@@ -291,7 +295,9 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
     }
 
     private fun navigateToLine(project: Project, file: VirtualFile, marker: MarkerEntry) {
+        logger.warn("[GUTTER_CLICK] click begin file=${file.path}, line=${marker.line}, nodeId=${marker.nodeId}")
         OpenFileDescriptor(project, file, marker.line, 0).navigate(true)
+        ToolWindowManager.getInstance(project).getToolWindow("CodeRemarkTour")?.show(null)
         SelectionBus.getInstance(project).requestSelect(marker.nodeId)
     }
 

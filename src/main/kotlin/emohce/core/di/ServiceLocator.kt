@@ -9,6 +9,7 @@ import emohce.domain.usecase.navigation.ProcessNavigationUseCase
 import emohce.domain.usecase.reference.DetectCircularRefUseCase
 import emohce.domain.usecase.reference.SyncReferencesUseCase
 import emohce.presentation.toolwindow.BookmarkViewModel
+import java.util.WeakHashMap
 
 class ServiceLocator(private val project: Project) {
     private val store by lazy { BookmarkStoreProvider.get(project) }
@@ -21,4 +22,11 @@ class ServiceLocator(private val project: Project) {
     val processNavigationUseCase by lazy { ProcessNavigationUseCase(bookmarkRepository) }
     val syncReferencesUseCase by lazy { SyncReferencesUseCase(bookmarkRepository, referenceRepository) }
     val detectCircularRefUseCase by lazy { DetectCircularRefUseCase(referenceRepository) }
+
+    companion object {
+        private val cache = WeakHashMap<Project, ServiceLocator>()
+        fun get(project: Project): ServiceLocator = synchronized(cache) {
+            cache.getOrPut(project) { ServiceLocator(project) }
+        }
+    }
 }

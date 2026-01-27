@@ -31,7 +31,6 @@ import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.diagnostic.Logger
-import emohce.presentation.editor.bookmark.IntelliJBookmarkManager
 import java.nio.file.Paths
 
 class BookmarkViewModel(
@@ -44,7 +43,6 @@ class BookmarkViewModel(
     private val dispatchers: CoroutineDispatchers
 ) {
     private val logger = Logger.getInstance(BookmarkViewModel::class.java)
-    private val intelliJBookmarkManager = IntelliJBookmarkManager(project)
     private val scope = CoroutineScope(dispatchers.main + SupervisorJob())
 
     private val _state = MutableStateFlow(BookmarkViewState())
@@ -142,18 +140,7 @@ class BookmarkViewModel(
             val targetsBySource = references.groupBy({ it.sourceId }, { it.targetId })
             val sourcesByTarget = references.groupBy({ it.targetId }, { it.sourceId })
             
-            logger.info("[RELOAD_BOOKMARKS] Step 8: Collecting all bookmarks for IntelliJ sync...")
-            val allBookmarks = mutableListOf<BookmarkNode.Bookmark>()
-            traverseBookmarks(root) { node ->
-                if (node is BookmarkNode.Bookmark) {
-                    allBookmarks.add(node)
-                }
-            }
-            logger.info("[RELOAD_BOOKMARKS] Step 8.1: Found ${allBookmarks.size} bookmarks, syncing to IntelliJ...")
-            intelliJBookmarkManager.syncAllBookmarks(allBookmarks)
-            logger.info("[RELOAD_BOOKMARKS] Step 8.2: IntelliJ bookmarks synced")
-            
-            logger.info("[RELOAD_BOOKMARKS] Step 9: Updating state...")
+            logger.info("[RELOAD_BOOKMARKS] Step 8: Updating state...")
             _state.update {
                 it.copy(
                     rootNode = root,
@@ -164,7 +151,7 @@ class BookmarkViewModel(
                     referenceSourcesByTarget = sourcesByTarget
                 )
             }
-            logger.info("[RELOAD_BOOKMARKS] Step 10: State updated, reload complete")
+            logger.info("[RELOAD_BOOKMARKS] Step 9: State updated, reload complete")
         } catch (e: Exception) {
             logger.error("[RELOAD_BOOKMARKS] Error: ${e.message}", e)
             _state.update { it.copy(error = e.message, isLoading = false) }
@@ -280,11 +267,6 @@ class BookmarkViewModel(
         bookmarkRepository.create(bookmark, parentId, insertIndex)
         logger.info("[CREATE_BOOKMARK] Step 2: Bookmark created in repository - nodeId=${bookmark.uuid}")
         
-        // 同步到 IntelliJ 内置书签系统，确保 gutter 图标显示
-        logger.info("[CREATE_BOOKMARK] Step 2.1: Syncing to IntelliJ bookmark system...")
-        intelliJBookmarkManager.createBookmark(bookmark)
-        logger.info("[CREATE_BOOKMARK] Step 2.2: IntelliJ bookmark created")
-        
         logger.info("[CREATE_BOOKMARK] Step 3: Reloading bookmarks...")
         reloadBookmarks()
         logger.info("[CREATE_BOOKMARK] Step 4: Bookmarks reloaded")
@@ -327,8 +309,6 @@ class BookmarkViewModel(
             if (count > 0) {
                 syncReferencesWithRetry(node.uuid, notifyOnSuccess = false)
             }
-            // 同步到 IntelliJ 内置书签系统
-            intelliJBookmarkManager.updateBookmark(node)
             // 刷新编辑器 Inlay 提示
             _sideEffects.emit(BookmarkSideEffect.RefreshInlays(node.filePath))
             // 通知文档监听器书签已变化
@@ -366,8 +346,6 @@ class BookmarkViewModel(
         if (node is BookmarkNode.Bookmark) {
             referenceRepository.deleteAllReferences(node.uuid)
             referenceRepository.deleteAllReferencesForTarget(node.uuid)
-            // 从 IntelliJ 内置书签系统删除
-            intelliJBookmarkManager.deleteBookmark(node.uuid)
             // 通知文档监听器书签已删除
             documentListener?.onBookmarksChanged(node.filePath)
         } else if (node is BookmarkNode.Process) {
