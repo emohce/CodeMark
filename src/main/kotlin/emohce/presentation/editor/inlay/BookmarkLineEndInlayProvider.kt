@@ -143,7 +143,7 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
         viewModel: BookmarkViewModel
     ): InlayPresentation {
         // Use custom renderer that draws icon and text
-        // Icon is displayed in gutter via BookmarkLineMarkerProvider
+        // Gutter icon is displayed via BookmarkHighlighterService (RangeHighlighter)
         // Here we create a presentation with icon (blue info icon) and text using remarkInlay style
         val renderer = BookmarkInlayRenderer(textValue, nodeId, filePath, line, project, editor, viewModel)
         return renderer

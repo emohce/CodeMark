@@ -51,10 +51,7 @@ class CreateBookmarkAtCaretAction : AnAction() {
                 emohce.presentation.toolwindow.BookmarkIntent.CreateBookmark(parentId, bookmark, null)
             )
         }
-        logger.info("[ACTION_CREATE_BOOKMARK] processIntent completed, requesting select for nodeId=${bookmark.uuid}")
-
-        SelectionBus.getInstance(project).requestSelect(bookmark.uuid)
-        logger.info("[ACTION_CREATE_BOOKMARK] Select requested, action complete")
+        logger.info("[ACTION_CREATE_BOOKMARK] processIntent completed, SelectNode side effect will handle tree selection")
         NotificationGroupManager.getInstance()
             .getNotificationGroup("CodeRemarkTour")
             .createNotification("CodeMark created", NotificationType.INFORMATION)

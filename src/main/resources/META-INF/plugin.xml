@@ -28,9 +28,6 @@
             id="CodeRemarkTour"
             displayType="BALLOON"
             isLogByDefault="true"/>
-        <codeInsight.lineMarkerProvider
-            language="ANY"
-            implementationClass="emohce.presentation.editor.gutter.BookmarkLineMarkerProvider"/>
         <codeInsight.inlayProvider
             language="ANY"
             implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>

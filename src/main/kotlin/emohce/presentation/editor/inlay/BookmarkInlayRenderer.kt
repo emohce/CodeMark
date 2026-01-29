@@ -29,7 +29,7 @@ class BookmarkInlayRenderer(
     private val viewModel: BookmarkViewModel
 ) : InlayPresentation {
 
-    // Icon is displayed in gutter via BookmarkLineMarkerProvider
+    // Gutter icon is displayed via BookmarkHighlighterService (RangeHighlighter)
     // Here we also display a small blue info icon at line end, followed by text with remarkInlay style
     private val icon = AllIcons.General.Information // Blue info icon
     private val text = " $label "

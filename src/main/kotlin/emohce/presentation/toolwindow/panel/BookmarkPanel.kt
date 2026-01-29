@@ -1701,26 +1701,10 @@ class BookmarkPanel(
                 
                 val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath)
                 if (file == null) {
-                    logger.warn("[REFRESH_INLAYS] Step 3: File not found, normalizedPath=$normalizedPath")
+                    logger.warn("[REFRESH_INLAYS] Step 3: File not found, normalizedPath=$normalizedPath (cache already cleared)")
                     return
                 }
                 logger.info("[REFRESH_INLAYS] Step 3: File found, path=${file.path}")
-                
-                // 清除 LineMarkerProvider 缓存，强制重新收集
-                // 注意：Provider 可能尚未初始化（延迟加载），这是正常情况
-                logger.info("[REFRESH_INLAYS] Step 4: Attempting to clear LineMarkerProvider cache...")
-                try {
-                    val providerInstance = emohce.presentation.editor.gutter.BookmarkLineMarkerProvider.getInstance()
-                    if (providerInstance != null) {
-                        logger.info("[REFRESH_INLAYS] Step 4.1: Found BookmarkLineMarkerProvider instance, clearing cache for file=$normalizedPath")
-                        emohce.presentation.editor.gutter.BookmarkLineMarkerProvider.clearCache(normalizedPath)
-                        logger.info("[REFRESH_INLAYS] Step 4.2: Cache cleared successfully")
-                    } else {
-                        logger.info("[REFRESH_INLAYS] Step 4.1: BookmarkLineMarkerProvider not initialized yet (normal for lazy loading). Daemon restart will trigger provider initialization.")
-                    }
-                } catch (e: Exception) {
-                    logger.warn("[REFRESH_INLAYS] Step 4: Exception while clearing cache: ${e.message}. Will proceed with daemon restart.", e)
-                }
                 
                 // 使用 WriteIntentReadAction 以满足 commitDocument 的写线程要求
                 logger.info("[REFRESH_INLAYS] Step 5: Executing WriteIntentReadAction to restart daemon...")
@@ -1756,24 +1740,23 @@ class BookmarkPanel(
                     }
                 }
                 
-                // 在 EDT 上延迟执行，确保 daemon 重启完成后再触发一次刷新
-                // 使用 ApplicationManager.invokeLater 确保在正确的线程上执行
+                // 在 EDT 上延迟执行 daemon 重启，确保 LineMarkerProvider 被重新调用
                 ApplicationManager.getApplication().invokeLater({
-                    logger.info("[REFRESH_INLAYS] Step 10: Invoking later to ensure daemon restart is processed")
-                    ReadAction.run<Nothing> {
-                        val psiFile = PsiManager.getInstance(project).findFile(file)
-                        if (psiFile != null) {
-                            val analyzer = DaemonCodeAnalyzer.getInstance(project)
-                            logger.info("[REFRESH_INLAYS] Step 10.1: Triggering additional daemon restart for gutter icons")
-                            // 使用 restart 方法，确保 LineMarkerProvider 被调用
-                            analyzer.restart(psiFile)
-                        } else {
-                            logger.warn("[REFRESH_INLAYS] Step 10.1: PSI file is null, cannot restart daemon")
-                        }
+                    logger.info("[REFRESH_INLAYS] Step 10: EDT daemon restart")
+                    val analyzer = DaemonCodeAnalyzer.getInstance(project)
+                    val psiFile = PsiManager.getInstance(project).findFile(file)
+                    if (psiFile != null) {
+                        logger.info("[REFRESH_INLAYS] Step 10.1: Restart daemon for file ${psiFile.name}")
+                        analyzer.restart(psiFile)
                     }
+                    logger.info("[REFRESH_INLAYS] Step 10.2: Full daemon restart")
+                    analyzer.restart()
                 }, com.intellij.openapi.application.ModalityState.NON_MODAL)
                 
-                logger.info("[REFRESH_INLAYS] Step 11: Daemon restart completed. Provider will be initialized and collect markers on next analysis pass.")
+                logger.info("[REFRESH_INLAYS] Step 11: Daemon restart scheduled.")
+            }
+            is BookmarkSideEffect.RefreshGutterAll -> {
+                // Gutter 由 BookmarkHighlighterService 单源刷新（RangeHighlighter），不再使用 LineMarkerProvider/daemon
             }
             is BookmarkSideEffect.RefreshBookmarkxJson -> {
                 // 刷新打开的 bookmarkx.json 文件编辑器

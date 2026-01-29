@@ -14,7 +14,6 @@ import com.intellij.psi.PsiDocumentManager
 import com.intellij.ui.EditorNotifications
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
-import emohce.presentation.editor.gutter.BookmarkLineMarkerProvider
 import emohce.presentation.toolwindow.BookmarkIntent
 import emohce.presentation.toolwindow.BookmarkViewModel
 import kotlinx.coroutines.CoroutineScope

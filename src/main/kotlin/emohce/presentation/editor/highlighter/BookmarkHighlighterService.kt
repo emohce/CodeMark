@@ -1,5 +1,7 @@
 package emohce.presentation.editor.highlighter
 
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
@@ -87,7 +89,6 @@ class BookmarkHighlighterService(private val project: Project) {
             locator.bookmarkRepository.observeChanges().collectLatest { event ->
                 logger.info("[GUTTER_HIGHLIGHT] repo event=${event.javaClass.simpleName}")
                 rebuildIndex()
-                refreshOpenEditors()
             }
         }
     }
@@ -135,6 +136,7 @@ class BookmarkHighlighterService(private val project: Project) {
             fileIndex.clear()
             fileIndex.putAll(map)
             logger.info("[GUTTER_HIGHLIGHT] index rebuilt files=${map.size}")
+            ApplicationManager.getApplication().invokeLater({ refreshOpenEditors() }, ModalityState.NON_MODAL)
         }
     }
 

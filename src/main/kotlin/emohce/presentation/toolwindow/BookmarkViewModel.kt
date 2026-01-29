@@ -31,7 +31,6 @@ import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.diagnostic.Logger
-import emohce.presentation.editor.gutter.BookmarkLineMarkerProvider
 import emohce.presentation.index.BookmarkIndexService
 import java.nio.file.Paths
 
@@ -195,16 +194,12 @@ class BookmarkViewModel(
                     }
                     is BookmarkEvent.NodeRemoved -> {
                         reloadBookmarks()
-                        // 无法直接取路径，改为全量清理缓存
-                        BookmarkLineMarkerProvider.clearAllCache()
                     }
                     is BookmarkEvent.NodeMoved -> {
                         reloadBookmarks()
-                        BookmarkLineMarkerProvider.clearAllCache()
                     }
                     is BookmarkEvent.ReferenceSynced -> {
-                        // 引用刷新可能影响提示，清空缓存等待下一轮收集
-                        BookmarkLineMarkerProvider.clearAllCache()
+                        // 引用刷新可能影响提示；gutter 由 BookmarkHighlighterService 在 observeChanges 后刷新
                     }
                 }
             }
@@ -265,7 +260,6 @@ class BookmarkViewModel(
     }
 
     private suspend fun refreshInlaysAndGutter(path: String) {
-        BookmarkLineMarkerProvider.clearCache(path)
         _sideEffects.emit(BookmarkSideEffect.RefreshInlays(path))
     }
     
@@ -293,13 +287,15 @@ class BookmarkViewModel(
         reloadBookmarks()
         logger.info("[CREATE_BOOKMARK] Step 4: Bookmarks reloaded")
         
-        logger.info("[CREATE_BOOKMARK] Step 5: Emitting SelectNode side effect - nodeId=${bookmark.uuid}")
+        // Gutter 由 BookmarkHighlighterService 在 repository observeChanges 后刷新
+        logger.info("[CREATE_BOOKMARK] Step 5: SelectNode and RefreshInlays")
+        logger.info("[CREATE_BOOKMARK] Step 6: Emitting SelectNode side effect - nodeId=${bookmark.uuid}")
         _sideEffects.emit(BookmarkSideEffect.SelectNode(bookmark.uuid))
         
-        logger.info("[CREATE_BOOKMARK] Step 6: Emitting RefreshInlays side effect - filePath=${bookmark.filePath}")
+        logger.info("[CREATE_BOOKMARK] Step 7: Emitting RefreshInlays side effect - filePath=${bookmark.filePath}")
         _sideEffects.emit(BookmarkSideEffect.RefreshInlays(bookmark.filePath))
         
-        logger.info("[CREATE_BOOKMARK] Step 7: Notifying document listener - filePath=${bookmark.filePath}")
+        logger.info("[CREATE_BOOKMARK] Step 8: Notifying document listener - filePath=${bookmark.filePath}")
         documentListener?.onBookmarksChanged(bookmark.filePath)
         
         logger.info("=== [CREATE_BOOKMARK_END] ===")
@@ -376,9 +372,9 @@ class BookmarkViewModel(
         }
         
         bookmarkRepository.delete(nodeId)
-        // observeChanges() 监听器会自动调用 reloadBookmarks() 和 clearAllCache()
+        // observeChanges() 会触发 BookmarkHighlighterService.rebuildIndex() → refreshOpenEditors()
         
-        // 手动刷新特定文件的行末 hints（observeChanges 无法获取文件路径）
+        // 手动刷新特定文件的行末 inlays
         filePath?.let { refreshInlaysAndGutter(it) }
         
         // 通知文档监听器（触发 BookmarkHighlighterService 刷新）
@@ -602,6 +598,8 @@ sealed class BookmarkSideEffect {
     data object ScrollToSelected : BookmarkSideEffect()
     data class SelectNode(val nodeId: String) : BookmarkSideEffect()
     data class RefreshInlays(val filePath: String) : BookmarkSideEffect()
+    /** 全量刷新 gutter：清缓存 + 全量 daemon 重启 */
+    data object RefreshGutterAll : BookmarkSideEffect()
     /** 刷新打开的 bookmarkx.json 编辑器 */
     data object RefreshBookmarkxJson : BookmarkSideEffect()
 }

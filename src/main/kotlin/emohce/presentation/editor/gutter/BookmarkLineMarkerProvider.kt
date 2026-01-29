@@ -18,11 +18,16 @@ import emohce.domain.model.BookmarkNode
 import emohce.presentation.selection.SelectionBus
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import javax.swing.Icon
 
 class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
     private val logger = Logger.getInstance(BookmarkLineMarkerProvider::class.java)
     private val cache = ConcurrentHashMap<String, CacheEntry>()
+    /** Paths recently cleared; force fresh collect for this many ms. */
+    private val invalidatedPathAt = ConcurrentHashMap<String, Long>()
+    private val lastClearAllTime = AtomicLong(0)
+    private val invalidationWindowMs = 5000L
     private val bookmarkIcon: Icon = AllIcons.Nodes.Bookmark
     private val processIcon: Icon = AllIcons.Actions.Execute
     private val fallbackIcon: Icon = IconLoader.getIcon("/META-INF/pluginIcon.svg", BookmarkLineMarkerProvider::class.java)
@@ -46,6 +51,14 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
         fun clearAllCache() {
             instance?.clearAllCacheInternal()
         }
+        
+        /**
+         * 为新创建的书签更新缓存
+         * 如果文件已缓存，直接添加新标记；否则清除缓存等待下次收集
+         */
+        fun updateCacheForNewBookmark(project: Project, bookmark: BookmarkNode.Bookmark) {
+            instance?.updateCacheForNewBookmarkInternal(project, bookmark)
+        }
     }
 
     init {
@@ -58,8 +71,9 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
      */
     private fun clearCacheInternal(filePath: String) {
         val normalizedPath = com.intellij.openapi.util.io.FileUtil.toSystemIndependentName(filePath)
-        val removed = cache.remove(normalizedPath)
-        logger.info("[GUTTER_CLEAR_CACHE] Cleared cache for file=$normalizedPath, hadEntry=${removed != null}")
+        cache.remove(normalizedPath)
+        invalidatedPathAt[normalizedPath] = System.currentTimeMillis()
+        logger.info("[GUTTER_CLEAR_CACHE] Cleared cache for file=$normalizedPath")
     }
     
     /**
@@ -68,7 +82,42 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
     private fun clearAllCacheInternal() {
         val count = cache.size
         cache.clear()
+        lastClearAllTime.set(System.currentTimeMillis())
         logger.info("[GUTTER_CLEAR_CACHE] Cleared all cache, removed $count entries")
+    }
+    
+    /**
+     * 为新创建的书签更新缓存
+     * 如果文件已缓存，直接添加新标记；否则清除缓存等待下次收集
+     */
+    private fun updateCacheForNewBookmarkInternal(project: Project, bookmark: BookmarkNode.Bookmark) {
+        val normalizedPath = FileUtil.toSystemIndependentName(bookmark.filePath)
+        logger.info("[GUTTER_UPDATE_CACHE] Updating cache for new bookmark: file=$normalizedPath, line=${bookmark.line}, nodeId=${bookmark.uuid}")
+        
+        val entry = cache[normalizedPath]
+        if (entry != null) {
+            // 如果缓存存在，检查是否已有该行的标记
+            val existingMarker = entry.markers.firstOrNull { it.line == bookmark.line && it.nodeId == bookmark.uuid }
+            if (existingMarker != null) {
+                logger.info("[GUTTER_UPDATE_CACHE] Marker already exists in cache, skipping update")
+                return
+            }
+            
+            // 添加新标记并排序
+            val newMarker = MarkerEntry(
+                line = bookmark.line,
+                nodeId = bookmark.uuid,
+                icon = bookmarkIcon,
+                tooltip = buildBookmarkTooltip(bookmark)
+            )
+            val updatedMarkers = (entry.markers + newMarker).sortedBy { it.line }
+            cache[normalizedPath] = CacheEntry(updatedMarkers, System.currentTimeMillis())
+            logger.info("[GUTTER_UPDATE_CACHE] Cache updated successfully, marker count=${updatedMarkers.size}")
+        } else {
+            // 如果缓存不存在，清除缓存让下次收集时包含新书签
+            logger.info("[GUTTER_UPDATE_CACHE] Cache entry not found for file=$normalizedPath, clearing cache to force refresh")
+            clearCacheInternal(normalizedPath)
+        }
     }
 
     override fun getName(): String = "CodeRemarkTour"
@@ -199,8 +248,16 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
         val normalizedPath = FileUtil.toSystemIndependentName(virtualFile.path)
         logger.info("[GUTTER_GET_MARKERS] Step 1: Getting markers for file=$normalizedPath")
         
-        val entry = cache[normalizedPath]
         val now = System.currentTimeMillis()
+        val pathInvalidated = invalidatedPathAt[normalizedPath]?.let { now - it < invalidationWindowMs } == true
+        val allInvalidated = lastClearAllTime.get() > 0 && now - lastClearAllTime.get() < invalidationWindowMs
+        if (pathInvalidated || allInvalidated) {
+            cache.remove(normalizedPath)
+            if (pathInvalidated) invalidatedPathAt.remove(normalizedPath)
+            logger.info("[GUTTER_GET_MARKERS] Step 1.1: Path/all recently invalidated, forcing fresh collect")
+        }
+        
+        val entry = cache[normalizedPath]
         if (entry != null && now - entry.timestamp < 2000) {
             logger.info("[GUTTER_GET_MARKERS] Step 2: Using cached markers, count=${entry.markers.size}, age=${now - entry.timestamp}ms")
             entry.markers.forEach { marker ->
