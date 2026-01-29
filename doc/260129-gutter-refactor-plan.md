@@ -1,18 +1,19 @@
 # Gutter 刷新重构方案（最高效最精准）
 
 **基线**：2025-01-29，当前实现为「双源 + 多处触发刷新」。  
-**目标**：单一数据源、单一刷新路径，符合 JetBrains 对「动态行号数据」的推荐做法。
+**目标**：单一数据源、单一刷新路径，符合 JetBrains 对「动态行号数据」的推荐做法。  
+**实施结果**：已按推荐方案完成；`BookmarkLineMarkerProvider` 已从插件中移除，gutter 仅由 `BookmarkHighlighterService`（RangeHighlighter）绘制。
 
 ---
 
 ## 一、现状与问题
 
-### 1.1 当前架构：双源绘制 Gutter
+### 1.1 重构前架构：双源绘制 Gutter（已废弃）
 
 | 组件 | 机制 | 数据来源 | 刷新方式 |
 |------|------|----------|----------|
 | **BookmarkHighlighterService** | `RangeHighlighter` + `GutterIconRenderer` | 自维护 `fileIndex`（repository 遍历） | `refreshOpenEditors()` |
-| **BookmarkLineMarkerProvider** | `LineMarkerProviderDescriptor`，`collectSlowLineMarkers` | 自维护 cache + repository | `clearAllCache()` + `DaemonCodeAnalyzer.restart()` |
+| ~~BookmarkLineMarkerProvider~~ | ~~LineMarkerProviderDescriptor~~ | ~~自维护 cache + repository~~ | ~~已删除~~ |
 
 两套逻辑都在画 gutter 图标，导致：
 
@@ -59,10 +60,8 @@
    - `rebuildIndex()` 末尾：仅保留「在 EDT 上调用 `refreshOpenEditors()`」，**删除**对 `BookmarkLineMarkerProvider.clearAllCache()` 和 `DaemonCodeAnalyzer` 的调用及相关 import。
    - 保持对 `FileEditorManagerListener` 的监听（文件打开/切换时对当前编辑器 `refreshEditor`）。
 
-2. **BookmarkLineMarkerProvider**
-   - **方案 2a（推荐）**：从 `plugin.xml` 的 `lineMarkerProvider` 中**移除**该 provider，不再注册。  
-     或  
-   - **方案 2b**：保留注册，但 `getLineMarkerInfo` / `collectSlowLineMarkers` 始终不添加书签相关 `LineMarkerInfo`（仅保留空实现或返回空集合），避免双图标。
+2. **BookmarkLineMarkerProvider**（已实施：删除）
+   - 已从 `plugin.xml` 移除 `lineMarkerProvider` 注册，并**删除** `BookmarkLineMarkerProvider.kt` 源文件。
 
 3. **BookmarkViewModel**
    - 删除所有 `BookmarkLineMarkerProvider.clearAllCache()`、`clearCache(path)`、`updateCacheForNewBookmark(...)` 调用。
@@ -109,4 +108,4 @@
 
 - JetBrains: [Line Marker Provider](https://plugins.jetbrains.com/docs/intellij/line-marker-provider.html)（PSI、leaf 元素、两阶段收集）。
 - 社区结论：静态/PSI 用 LineMarkerProvider，动态/行号用 RangeHighlighter + GutterIconRenderer。
-- 项目内：`BookmarkHighlighterService`、`BookmarkLineMarkerProvider`、`BookmarkPanel`（RefreshGutterAll）、`BookmarkViewModel`（clearAllCache/RefreshGutterAll）。
+- 项目内：`BookmarkHighlighterService`、`BookmarkPanel`、`BookmarkViewModel`；`BookmarkLineMarkerProvider` 已删除。

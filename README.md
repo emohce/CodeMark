@@ -37,9 +37,8 @@
 - **Repository & UseCase**：`BookmarkRepositoryImpl`、`ReferenceRepositoryImpl`，配合 ProcessNavigation/SyncReferences/DetectCircularRef 等用例。
 - **ViewModel**：`BookmarkViewModel` 基于 StateFlow + SharedFlow 管理状态与副作用。
 - **编辑器集成**：
-  - `BookmarkLineMarkerProvider`（自定义 gutter）
+  - `BookmarkHighlighterService`（gutter 图标 + 行高亮，单源 RangeHighlighter）
   - `BookmarkLineEndInlayProvider`（行尾 inlay）
-  - `BookmarkHighlighterService`（高亮与联动）
 - **交互总线**：`SelectionBus` 协调工具窗口与编辑器选中状态。
 
 ## 已知限制
@@ -54,7 +53,7 @@
 
 ## 开发提示
 - 代码入口：ToolWindow 工厂 `emohce.presentation.toolwindow.CodeRemarkTourToolWindowFactory`，启动活动 `emohce.core.startup.BookmarkStartupActivity`。
-- 插件声明：`./src/main/resources/META-INF/plugin.xml`（待补自定义 lineMarker 注册，内置书签同步开关默认关）。
+- 插件声明：`./src/main/resources/META-INF/plugin.xml`（gutter 由 BookmarkHighlighterService 绘制，内置书签同步开关默认关）。
 - 依赖与构建：`./build.gradle.kts`，JDK 21；如需下调 IDEA 版本请同步 sinceBuild。
 - 内置书签同步开关：项目设置 `BookmarkSettingsService`（默认 false），可通过 Registry `coderemarktour.enableLegacyIntellijSync` 强制开启；`IntelliJBookmarkManager` 标记 @Deprecated。
 
