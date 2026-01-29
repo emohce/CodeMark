@@ -24,9 +24,9 @@ class CreateBookmarkAtCaretAction : AnAction() {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return logger.warn("[ACTION_CREATE_BOOKMARK] No file")
 
         logger.info("[ACTION_CREATE_BOOKMARK] Showing input dialog for bookmark name...")
-        val name = Messages.showInputDialog(project, "Bookmark name:", "Create Bookmark", null) ?: return logger.info("[ACTION_CREATE_BOOKMARK] User cancelled name input")
+        val name = Messages.showInputDialog(project, "CodeMark name:", "Create CodeMark", null) ?: return logger.info("[ACTION_CREATE_BOOKMARK] User cancelled name input")
         if (name.isBlank()) return logger.warn("[ACTION_CREATE_BOOKMARK] Name is blank")
-        val description = Messages.showInputDialog(project, "Description (optional):", "Create Bookmark", null) ?: ""
+        val description = Messages.showInputDialog(project, "Description (optional):", "Create CodeMark", null) ?: ""
 
         val caret = editor.caretModel.primaryCaret
         val line = caret.logicalPosition.line
@@ -57,7 +57,7 @@ class CreateBookmarkAtCaretAction : AnAction() {
         logger.info("[ACTION_CREATE_BOOKMARK] Select requested, action complete")
         NotificationGroupManager.getInstance()
             .getNotificationGroup("CodeRemarkTour")
-            .createNotification("Bookmark created", NotificationType.INFORMATION)
+            .createNotification("CodeMark created", NotificationType.INFORMATION)
             .notify(project)
     }
 

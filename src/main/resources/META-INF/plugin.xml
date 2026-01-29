@@ -58,8 +58,8 @@
     <actions>
         <action id="CodeRemarkTour.CreateBookmarkAtCaret"
                 class="emohce.presentation.action.CreateBookmarkAtCaretAction"
-                text="Add Bookmark Here"
-                description="Create a bookmark at the current caret">
+                text="Add CodeMark Here"
+                description="Create a codemark at the current caret">
             <keyboard-shortcut keymap="$default" first-keystroke="shift F2"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>

@@ -234,7 +234,7 @@ class BookmarkPanel(
         val toolbar = JPanel(FlowLayout(FlowLayout.LEFT))
         val addGroup = JButton("Add Group")
         val addProcess = JButton("Add Process")
-        val addBookmark = JButton("Add Bookmark")
+        val addBookmark = JButton("Add CodeMark")
         val addNote = JButton("Add Note")
         val addStep = JButton("Add Step")
         val editNode = JButton("Edit")
@@ -836,11 +836,11 @@ class BookmarkPanel(
     }
 
     private fun createBookmark() {
-        val name = Messages.showInputDialog(project, "Bookmark name:", "Create Bookmark", null) ?: return
+        val name = Messages.showInputDialog(project, "CodeMark name:", "Create CodeMark", null) ?: return
         if (name.isBlank()) return
-        val filePath = Messages.showInputDialog(project, "File path:", "Create Bookmark", null) ?: return
-        if (!ensureFileExists(filePath, "Create Bookmark")) return
-        val lineText = Messages.showInputDialog(project, "Line number:", "Create Bookmark", null) ?: "0"
+        val filePath = Messages.showInputDialog(project, "File path:", "Create CodeMark", null) ?: return
+        if (!ensureFileExists(filePath, "Create CodeMark")) return
+        val lineText = Messages.showInputDialog(project, "Line number:", "Create CodeMark", null) ?: "0"
         val line = (lineText.toIntOrNull() ?: 0).coerceAtLeast(0)
         val (parentId, insertIndex) = insertionTarget()
         val bookmark = BookmarkNode.Bookmark(name = name.trim(), filePath = filePath.trim(), line = line)
@@ -919,9 +919,9 @@ class BookmarkPanel(
             .addLabeledComponent("Column", columnField)
             .panel
 
-        if (!showPanelOkCancel(panel, "Edit Bookmark")) return null
+        if (!showPanelOkCancel(panel, "Edit CodeMark")) return null
         val path = pathField.text.trim()
-        if (!ensureFileExists(path, "Edit Bookmark")) return null
+        if (!ensureFileExists(path, "Edit CodeMark")) return null
         val line = (lineField.text.trim().toIntOrNull() ?: node.line).coerceAtLeast(0)
         val column = (columnField.text.trim().toIntOrNull() ?: node.column).coerceAtLeast(0)
         return node.copy(
@@ -1034,7 +1034,7 @@ class BookmarkPanel(
         val bookmarks = collectBookmarks(root).filter { it.uuid != source.uuid }
         if (bookmarks.isEmpty()) return
         val labels = bookmarks.map { formatBookmarkLabel(it) }.toTypedArray()
-        val choiceIndex = chooseIndex("Select target bookmark:", "Create Reference", labels)
+        val choiceIndex = chooseIndex("Select target codemark:", "Create Reference", labels)
         val target = bookmarks.getOrNull(choiceIndex) ?: return
         viewModel.processIntent(BookmarkIntent.CreateReference(source.uuid, target.uuid))
     }
@@ -1403,7 +1403,7 @@ class BookmarkPanel(
         val source = selectedNode() as? BookmarkNode.Bookmark ?: return
         val confirmed = Messages.showYesNoDialog(
             project,
-            "Delete all references for this bookmark?",
+            "Delete all references for this codemark?",
             "Delete References",
             Messages.getQuestionIcon()
         )
@@ -1537,11 +1537,11 @@ class BookmarkPanel(
                 val incoming = currentSourcesByTarget[node.uuid]?.size ?: 0
                 when {
                     outgoing > 0 && incoming > 0 ->
-                        "This bookmark has $outgoing outgoing references and is referenced by $incoming sources. Deleting will remove related references."
+                        "This codemark has $outgoing outgoing references and is referenced by $incoming sources. Deleting will remove related references."
                     outgoing > 0 ->
-                        "This bookmark has $outgoing outgoing references. Deleting will remove related references."
+                        "This codemark has $outgoing outgoing references. Deleting will remove related references."
                     incoming > 0 ->
-                        "This bookmark is referenced by $incoming sources. Deleting will remove related references."
+                        "This codemark is referenced by $incoming sources. Deleting will remove related references."
                     else -> "Delete selected node?"
                 }
             }
