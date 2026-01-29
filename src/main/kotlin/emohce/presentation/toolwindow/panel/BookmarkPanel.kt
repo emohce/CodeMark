@@ -27,6 +27,7 @@ import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.FormBuilder
 import emohce.domain.model.BookmarkNode
 import emohce.presentation.selection.SelectionBus
+import emohce.presentation.index.BookmarkIndexService
 import emohce.presentation.toolwindow.BookmarkIntent
 import emohce.presentation.toolwindow.BookmarkSideEffect
 import emohce.presentation.toolwindow.BookmarkViewModel
@@ -81,10 +82,11 @@ class BookmarkPanel(
     private val viewModel: BookmarkViewModel
 ) : JPanel(BorderLayout()), Disposable {
     private val logger = Logger.getInstance(BookmarkPanel::class.java)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val treeModel = DefaultTreeModel(DefaultMutableTreeNode("Loading"))
-    private val tree = Tree(treeModel)
-    private val searchField = JTextField(24)
+    private lateinit var tree: Tree
+    private lateinit var searchField: JTextField
+    private lateinit var scope: CoroutineScope
+    private val indexService = BookmarkIndexService.getInstance(project)
     private var currentRoot: BookmarkNode.Group? = null
     private var currentReferenceCounts: Map<String, Int> = emptyMap()
     private var currentReferenceTargets: Set<String> = emptySet()
@@ -109,6 +111,9 @@ class BookmarkPanel(
     }
 
     init {
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+        searchField = JTextField(24)
+        tree = Tree(treeModel)
         tree.isRootVisible = true
         tree.cellRenderer = BookmarkTreeCellRenderer()
         tree.selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
@@ -309,9 +314,21 @@ class BookmarkPanel(
             handleSideEffect(effect)
         }.launchIn(scope)
 
-        SelectionBus.getInstance(project).requests.onEach { nodeId ->
+        SelectionBus.getInstance(project).requests.onEach { req ->
             viewModel.processIntent(BookmarkIntent.Refresh)
-            selectNodeById(nodeId)
+            val found: Boolean = selectNodeById(req.nodeId)
+            if (found) {
+                // 继续使用带重试的选择，确保树更新后也能正确展开/定位
+                selectNodeWithRetry(req.nodeId)
+            } else {
+                val byIndex = req.filePath?.let { path -> indexService.firstMatch(path, req.line)?.nodeId }
+                val resolvedId = byIndex
+                if (resolvedId != null) {
+                    selectNodeWithRetry(resolvedId)
+                } else if (req.filePath != null) {
+                    selectNodeByPathAndLine(req.filePath, req.line)
+                }
+            }
         }.launchIn(scope)
     }
 
@@ -582,6 +599,31 @@ class BookmarkPanel(
             logger.info("selectNodeById: completed successfully")
         }
         return success
+    }
+
+    private fun selectNodeByPathAndLine(filePath: String, line: Int?): Boolean {
+        logger.info("selectNodeByPathAndLine: fallback search for path=$filePath line=$line")
+        val root = treeModel.root as? DefaultMutableTreeNode ?: return false
+        val target = BookmarkTreeUtil.findNode(root) { view ->
+            val node = view.node
+            when (node) {
+                is BookmarkNode.Bookmark -> {
+                    node.filePath == filePath && (line == null || node.line == line)
+                }
+                is BookmarkNode.Process -> {
+                    node.entryFilePath == filePath && (line == null || node.entryLine == line)
+                }
+                else -> false
+            }
+        }
+        val nodeView = target?.userObject as? NodeView
+        val nodeId = nodeView?.node?.uuid
+        return if (nodeId != null) {
+            selectNodeWithRetry(nodeId, maxRetries = 3, delayMs = 100)
+            true
+        } else {
+            false
+        }
     }
     
     /**

@@ -7,17 +7,19 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
+data class SelectionRequest(val nodeId: String, val filePath: String? = null, val line: Int? = null)
+
 @Service(Service.Level.PROJECT)
 class SelectionBus {
-    private val _requests = MutableSharedFlow<String>(extraBufferCapacity = 64)
-    val requests: SharedFlow<String> = _requests.asSharedFlow()
+    private val _requests = MutableSharedFlow<SelectionRequest>(extraBufferCapacity = 64)
+    val requests: SharedFlow<SelectionRequest> = _requests.asSharedFlow()
     @Volatile
     private var currentContainerId: String? = null
     @Volatile
     private var lastSelectedNodeId: String? = null
 
-    fun requestSelect(nodeId: String) {
-        _requests.tryEmit(nodeId)
+    fun requestSelect(nodeId: String, filePath: String? = null, line: Int? = null) {
+        _requests.tryEmit(SelectionRequest(nodeId, filePath, line))
     }
 
     fun setCurrentContainerId(containerId: String?) {

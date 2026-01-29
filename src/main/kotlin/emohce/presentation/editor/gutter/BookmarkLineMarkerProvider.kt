@@ -295,10 +295,10 @@ class BookmarkLineMarkerProvider : LineMarkerProviderDescriptor() {
     }
 
     private fun navigateToLine(project: Project, file: VirtualFile, marker: MarkerEntry) {
-        logger.warn("[GUTTER_CLICK] click begin file=${file.path}, line=${marker.line}, nodeId=${marker.nodeId}")
-        OpenFileDescriptor(project, file, marker.line, 0).navigate(true)
+        // 只高亮/展开对应节点，不移动光标
+        logger.warn("[GUTTER_CLICK] highlight-only file=${file.path}, line=${marker.line}, nodeId=${marker.nodeId}")
         ToolWindowManager.getInstance(project).getToolWindow("CodeRemarkTour")?.show(null)
-        SelectionBus.getInstance(project).requestSelect(marker.nodeId)
+        SelectionBus.getInstance(project).requestSelect(marker.nodeId, file.path, marker.line)
     }
 
     private fun buildBookmarkTooltip(node: BookmarkNode.Bookmark): String {

@@ -31,6 +31,8 @@ import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.diagnostic.Logger
+import emohce.presentation.editor.gutter.BookmarkLineMarkerProvider
+import emohce.presentation.index.BookmarkIndexService
 import java.nio.file.Paths
 
 class BookmarkViewModel(
@@ -55,6 +57,8 @@ class BookmarkViewModel(
     val sideEffects: SharedFlow<BookmarkSideEffect> = _sideEffects.asSharedFlow()
 
     private var documentListener: emohce.presentation.editor.BookmarkDocumentListener? = null
+
+    private val indexService = BookmarkIndexService.getInstance(project)
 
     init {
         loadBookmarks()
@@ -151,6 +155,8 @@ class BookmarkViewModel(
                     referenceSourcesByTarget = sourcesByTarget
                 )
             }
+            // Rebuild index for fast lookup
+            indexService.rebuild(root)
             logger.info("[RELOAD_BOOKMARKS] Step 9: State updated, reload complete")
         } catch (e: Exception) {
             logger.error("[RELOAD_BOOKMARKS] Error: ${e.message}", e)
@@ -170,7 +176,7 @@ class BookmarkViewModel(
                             is BookmarkNode.Process -> node.entryFilePath
                             else -> null
                         }
-                        path?.let { _sideEffects.emit(BookmarkSideEffect.RefreshInlays(it)) }
+                        path?.let { refreshInlaysAndGutter(it) }
                     }
                     is BookmarkEvent.NodeUpdated -> {
                         reloadBookmarks()
@@ -179,17 +185,27 @@ class BookmarkViewModel(
                         // 刷新编辑器 Inlay
                         when (val node = event.node) {
                             is BookmarkNode.Bookmark -> {
-                                _sideEffects.emit(BookmarkSideEffect.RefreshInlays(node.filePath))
+                                refreshInlaysAndGutter(node.filePath)
                             }
                             is BookmarkNode.Process -> {
-                                node.entryFilePath?.let { _sideEffects.emit(BookmarkSideEffect.RefreshInlays(it)) }
+                                node.entryFilePath?.let { refreshInlaysAndGutter(it) }
                             }
                             else -> Unit
                         }
                     }
-                    is BookmarkEvent.NodeRemoved -> reloadBookmarks()
-                    is BookmarkEvent.NodeMoved -> reloadBookmarks()
-                    is BookmarkEvent.ReferenceSynced -> Unit
+                    is BookmarkEvent.NodeRemoved -> {
+                        reloadBookmarks()
+                        // 无法直接取路径，改为全量清理缓存
+                        BookmarkLineMarkerProvider.clearAllCache()
+                    }
+                    is BookmarkEvent.NodeMoved -> {
+                        reloadBookmarks()
+                        BookmarkLineMarkerProvider.clearAllCache()
+                    }
+                    is BookmarkEvent.ReferenceSynced -> {
+                        // 引用刷新可能影响提示，清空缓存等待下一轮收集
+                        BookmarkLineMarkerProvider.clearAllCache()
+                    }
                 }
             }
         }
@@ -238,13 +254,19 @@ class BookmarkViewModel(
                                 else -> Unit
                             }
                         }
+                        indexService.rebuild(root)
                         affectedPaths.forEach { path ->
-                            _sideEffects.emit(BookmarkSideEffect.RefreshInlays(path))
+                            refreshInlaysAndGutter(path)
                         }
                     }
                 }
             }
         })
+    }
+
+    private suspend fun refreshInlaysAndGutter(path: String) {
+        BookmarkLineMarkerProvider.clearCache(path)
+        _sideEffects.emit(BookmarkSideEffect.RefreshInlays(path))
     }
     
     private fun traverseBookmarks(node: BookmarkNode, visitor: (BookmarkNode) -> Unit) {

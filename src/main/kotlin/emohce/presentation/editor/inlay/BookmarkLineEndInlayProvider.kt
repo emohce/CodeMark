@@ -20,6 +20,7 @@ import emohce.presentation.editor.inlay.BookmarkInlayRenderer
 import emohce.presentation.toolwindow.BookmarkViewModel
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
+import emohce.presentation.index.BookmarkIndexService
 import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -78,6 +79,17 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
 
         val hints = runBlocking {
             withContext(Dispatchers.IO) {
+                val index = BookmarkIndexService.getInstance(file.project)
+                val indexed = index.entriesForFile(normalizedPath).map {
+                    val label = it.label.ifBlank {
+                        if (it.type == BookmarkIndexService.NodeType.PROCESS) "Process" else "Bookmark"
+                    }
+                    val hintType = if (it.type == BookmarkIndexService.NodeType.PROCESS) HintType.PROCESS else HintType.BOOKMARK
+                    HintEntry(it.line, label, it.nodeId, hintType)
+                }
+                if (indexed.isNotEmpty()) return@withContext indexed
+
+                // Fallback to repository traversal if index empty
                 val locator = ServiceLocator(file.project)
                 val root = locator.bookmarkRepository.getRootNode()
                 collectHints(root, normalizedPath)
