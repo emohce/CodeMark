@@ -188,7 +188,9 @@ class BookmarkHighlighterService(private val project: Project) {
                     })
                     group.add(object : com.intellij.openapi.actionSystem.AnAction("Delete") {
                         override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
-                            scope.launch { locator.bookmarkRepository.delete(entry.nodeId) }
+                            scope.launch { 
+                                viewModel.processIntent(BookmarkIntent.DeleteNode(entry.nodeId))
+                            }
                         }
                     })
                     return group

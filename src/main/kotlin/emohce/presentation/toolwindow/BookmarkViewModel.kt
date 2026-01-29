@@ -365,15 +365,24 @@ class BookmarkViewModel(
 
     private suspend fun handleDeleteNode(nodeId: String) {
         val node = bookmarkRepository.findByUuid(nodeId)
-        if (node is BookmarkNode.Bookmark) {
-            referenceRepository.deleteAllReferences(node.uuid)
-            referenceRepository.deleteAllReferencesForTarget(node.uuid)
-            // 通知文档监听器书签已删除
-            documentListener?.onBookmarksChanged(node.filePath)
-        } else if (node is BookmarkNode.Process) {
-            node.entryFilePath?.let { documentListener?.onBookmarksChanged(it) }
+        val filePath = when (node) {
+            is BookmarkNode.Bookmark -> {
+                referenceRepository.deleteAllReferences(node.uuid)
+                referenceRepository.deleteAllReferencesForTarget(node.uuid)
+                node.filePath
+            }
+            is BookmarkNode.Process -> node.entryFilePath
+            else -> null
         }
+        
         bookmarkRepository.delete(nodeId)
+        // observeChanges() 监听器会自动调用 reloadBookmarks() 和 clearAllCache()
+        
+        // 手动刷新特定文件的行末 hints（observeChanges 无法获取文件路径）
+        filePath?.let { refreshInlaysAndGutter(it) }
+        
+        // 通知文档监听器（触发 BookmarkHighlighterService 刷新）
+        filePath?.let { documentListener?.onBookmarksChanged(it) }
     }
 
     private suspend fun handleCreateReference(sourceId: String, targetId: String) {
