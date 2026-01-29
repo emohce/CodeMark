@@ -9,6 +9,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.TextEditor
+import com.intellij.openapi.editor.ScrollType
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
@@ -1813,9 +1814,41 @@ class BookmarkPanel(
             logger.error("navigateToFile: file not found for path=$filePath")
             return
         }
-        logger.info("navigateToFile: file found, navigating to line=$line, column=$column")
-        OpenFileDescriptor(project, file, line.coerceAtLeast(0), column.coerceAtLeast(0)).navigate(true)
-        logger.info("navigateToFile: navigation completed")
+        logger.info("navigateToFile: file found, opening file and scrolling to line=$line without moving cursor")
+        
+        // 打开文件但不请求焦点（保持焦点在树组件上，以便识别快捷键）
+        val fileEditorManager = FileEditorManager.getInstance(project)
+        fileEditorManager.openFile(file, false)
+        
+        // 使用 invokeLater 确保编辑器已完全初始化
+        javax.swing.SwingUtilities.invokeLater {
+            // 获取文本编辑器并滚动到指定行（居中显示），但不移动光标
+            val editors = fileEditorManager.getEditors(file)
+            editors.forEach { editor ->
+                (editor as? TextEditor)?.editor?.let { textEditor ->
+                    val targetLine = line.coerceAtLeast(0)
+                    val document = textEditor.document
+                    if (targetLine < document.lineCount) {
+                        // 保存当前光标位置
+                        val primaryCaret = textEditor.caretModel.primaryCaret
+                        val savedOffset = primaryCaret.offset
+                        
+                        // 临时移动光标到目标行（用于滚动）
+                        val targetOffset = document.getLineStartOffset(targetLine)
+                        primaryCaret.moveToOffset(targetOffset)
+                        
+                        // 滚动到光标位置并居中显示
+                        textEditor.scrollingModel.scrollToCaret(ScrollType.CENTER)
+                        
+                        // 恢复原来的光标位置
+                        primaryCaret.moveToOffset(savedOffset)
+                        
+                        logger.info("navigateToFile: scrolled to line $targetLine and restored cursor position")
+                    }
+                }
+            }
+            logger.info("navigateToFile: navigation completed")
+        }
     }
 
     private fun ensureFileExists(path: String, title: String): Boolean {
