@@ -1,4 +1,4 @@
-﻿package emohce.domain.repository
+package emohce.domain.repository
 
 import emohce.domain.event.BookmarkEvent
 import emohce.domain.model.BookmarkNode
@@ -9,6 +9,8 @@ interface BookmarkRepository {
     suspend fun findByUuid(uuid: String): BookmarkNode?
     suspend fun findByFilePath(filePath: String): List<BookmarkNode.Bookmark>
     suspend fun findParent(nodeId: String): BookmarkNode?
+    /** Returns (parentId, indexAfterThis) for inserting a sibling after the given node; null if root or not found. */
+    suspend fun getInsertPositionAfterNode(nodeId: String): Pair<String?, Int?>?
     suspend fun search(query: String, limit: Int = 50): List<BookmarkNode>
 
     suspend fun create(node: BookmarkNode, parentId: String?, index: Int? = null)

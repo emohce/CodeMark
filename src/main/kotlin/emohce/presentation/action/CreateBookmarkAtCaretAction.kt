@@ -42,13 +42,14 @@ class CreateBookmarkAtCaretAction : AnAction() {
         )
         logger.info("[ACTION_CREATE_BOOKMARK] Bookmark created with uuid=${bookmark.uuid}")
 
-        val parentId = SelectionBus.getInstance(project).getCurrentContainerId()
-        logger.info("[ACTION_CREATE_BOOKMARK] ParentId=$parentId, calling processIntent...")
         runBlocking {
             val locator = ServiceLocator(project)
-            // 通过 ViewModel 创建书签，确保 editor hints 和树形结构都自动刷新
+            val (parentId, insertIndex) = locator.bookmarkViewModel.getInsertionTarget(
+                SelectionBus.getInstance(project).getLastSelectedNodeId()
+            )
+            logger.info("[ACTION_CREATE_BOOKMARK] ParentId=$parentId, insertIndex=$insertIndex, calling processIntent...")
             locator.bookmarkViewModel.processIntent(
-                emohce.presentation.toolwindow.BookmarkIntent.CreateBookmark(parentId, bookmark, null)
+                emohce.presentation.toolwindow.BookmarkIntent.CreateBookmark(parentId, bookmark, insertIndex)
             )
         }
         logger.info("[ACTION_CREATE_BOOKMARK] processIntent completed, SelectNode side effect will handle tree selection")

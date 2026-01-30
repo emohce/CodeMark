@@ -1,4 +1,4 @@
-﻿package emohce.domain.usecase.navigation
+package emohce.domain.usecase.navigation
 
 import emohce.domain.event.BookmarkEvent
 import emohce.domain.model.BookmarkNode
@@ -34,6 +34,7 @@ class ProcessNavigationUseCaseTest {
         override suspend fun findByUuid(uuid: String): BookmarkNode? = null
         override suspend fun findByFilePath(filePath: String): List<BookmarkNode.Bookmark> = emptyList()
         override suspend fun findParent(nodeId: String): BookmarkNode? = null
+        override suspend fun getInsertPositionAfterNode(nodeId: String): Pair<String?, Int?>? = null
         override suspend fun search(query: String, limit: Int): List<BookmarkNode> = emptyList()
         override suspend fun create(node: BookmarkNode, parentId: String?, index: Int?) = Unit
         override suspend fun update(node: BookmarkNode) = Unit

@@ -6,13 +6,14 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Editor
-import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.editor.markup.HighlighterLayer
 import com.intellij.openapi.editor.markup.HighlighterTargetArea
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
+import com.intellij.openapi.fileEditor.TextEditor
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.VirtualFile
@@ -34,6 +35,7 @@ import kotlinx.coroutines.withContext
 import java.awt.event.ActionEvent
 import javax.swing.JComponent
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 
 @Service(Service.Level.PROJECT)
 class BookmarkHighlighterService(private val project: Project) {
@@ -45,6 +47,7 @@ class BookmarkHighlighterService(private val project: Project) {
     private val viewModel by lazy { locator.bookmarkViewModel }
     private val editorHighlighters = mutableMapOf<Editor, MutableList<com.intellij.openapi.editor.markup.RangeHighlighter>>()
     private val fileIndex = ConcurrentHashMap<String, List<MarkerEntry>>()
+    private val pendingEditors = ConcurrentLinkedQueue<Pair<Editor, VirtualFile>>()
     @Volatile private var started = false
     /** Gutter/hints only paint after first rebuild; avoids empty/wrong flash at startup. */
     @Volatile private var indexReady = false
@@ -53,10 +56,9 @@ class BookmarkHighlighterService(private val project: Project) {
         if (started) return
         started = true
         logger.info("[GUTTER_HIGHLIGHT] service start")
-        rebuildIndex()
         listenEditors()
         listenRepository()
-        // Gutter refresh only after index is ready (invokeLater in rebuildIndex())
+        rebuildIndex()
     }
 
     fun dispose() {
@@ -105,12 +107,95 @@ class BookmarkHighlighterService(private val project: Project) {
     }
 
     private fun refreshEditor(editor: Editor, file: VirtualFile) {
-        if (!indexReady) return
+        if (!indexReady) {
+            pendingEditors.offer(editor to file)
+            return
+        }
+        doRefreshEditor(editor, file)
+    }
+
+    private fun doRefreshEditor(editor: Editor, file: VirtualFile) {
         scope.launch {
             val normalized = FileUtil.toSystemIndependentName(file.path)
             val entries = withContext(Dispatchers.IO) { fileIndex[normalized].orEmpty() }
-            applyHighlighters(editor, entries)
+            try {
+                applyHighlighters(editor, entries)
+            } catch (_: Exception) {
+                // Editor may have been closed while pending
+            }
         }
+    }
+
+    private fun processPendingEditors() {
+        while (true) {
+            val pair = pendingEditors.poll() ?: break
+            val (editor, file) = pair
+            doRefreshEditor(editor, file)
+        }
+    }
+
+    /**
+     * Flash the given line in open editors for the file (e.g. after tree-node navigation).
+     * Same visual effect as gutter icon click.
+     */
+    fun flashLineForFile(filePath: String, line: Int) {
+        scope.launch {
+            val normalized = FileUtil.toSystemIndependentName(filePath)
+            withContext(Dispatchers.Main) {
+                val file = LocalFileSystem.getInstance().findFileByPath(normalized) ?: return@withContext
+                val fem = FileEditorManager.getInstance(project)
+                fem.getEditors(file).forEach { editor ->
+                    if (editor is TextEditor) {
+                        flashLine(editor.editor, line)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Refresh gutter for a single file immediately (e.g. after CreateBookmark).
+     * Does not depend on full rebuild; reads current root and applies highlighters for open editors of this file.
+     */
+    fun refreshGutterForFile(path: String) {
+        scope.launch {
+            val normalized = FileUtil.toSystemIndependentName(path)
+            val root = withContext(Dispatchers.IO) { locator.bookmarkRepository.getRootNode() }
+            val entries = withContext(Dispatchers.IO) { collectEntriesForPath(root, normalized) }
+            withContext(Dispatchers.Main) {
+                val fem = FileEditorManager.getInstance(project)
+                val file = com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByPath(normalized)
+                    ?: return@withContext
+                val editors = fem.getEditors(file)
+                editors.forEach { editor ->
+                    if (editor is com.intellij.openapi.fileEditor.TextEditor) {
+                        applyHighlighters(editor.editor, entries)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun collectEntriesForPath(root: BookmarkNode.Group, targetPath: String): List<MarkerEntry> {
+        val list = mutableListOf<MarkerEntry>()
+        traverse(root) { node ->
+            when (node) {
+                is BookmarkNode.Bookmark -> {
+                    if (FileUtil.toSystemIndependentName(node.filePath) == targetPath) {
+                        list.add(MarkerEntry(node.uuid, node.name, node.line, node.filePath))
+                    }
+                }
+                is BookmarkNode.Process -> {
+                    val entryPath = node.entryFilePath
+                    val entryLine = node.entryLine
+                    if (entryPath != null && entryLine != null && FileUtil.toSystemIndependentName(entryPath) == targetPath) {
+                        list.add(MarkerEntry(node.uuid, node.name, entryLine, entryPath))
+                    }
+                }
+                else -> Unit
+            }
+        }
+        return list.sortedBy { it.line }
     }
 
     private fun rebuildIndex() {
@@ -142,7 +227,10 @@ class BookmarkHighlighterService(private val project: Project) {
             BookmarkIndexService.getInstance(project).rebuild(root)
             indexReady = true
             logger.info("[GUTTER_HIGHLIGHT] index rebuilt files=${map.size}")
-            ApplicationManager.getApplication().invokeLater({ refreshOpenEditors() }, ModalityState.NON_MODAL)
+            ApplicationManager.getApplication().invokeLater({
+                processPendingEditors()
+                refreshOpenEditors()
+            }, ModalityState.any())
         }
     }
 
@@ -151,18 +239,15 @@ class BookmarkHighlighterService(private val project: Project) {
         if (entries.isEmpty()) return
         val doc = editor.document
         val highlightList = mutableListOf<com.intellij.openapi.editor.markup.RangeHighlighter>()
-        val colors = EditorColorsManager.getInstance().globalScheme
-        val bg = colors.getAttributes(com.intellij.openapi.editor.colors.EditorColors.SEARCH_RESULT_ATTRIBUTES)?.backgroundColor
         entries.forEach { entry ->
             if (entry.line < 0 || entry.line >= doc.lineCount) return@forEach
             val start = doc.getLineStartOffset(entry.line)
             val end = doc.getLineEndOffset(entry.line)
-            val attrs = bg?.let { com.intellij.openapi.editor.markup.TextAttributes(null, it, null, null, 0) }
             val hl = editor.markupModel.addRangeHighlighter(
                 start,
                 end,
                 HighlighterLayer.ADDITIONAL_SYNTAX,
-                attrs,
+                null,
                 HighlighterTargetArea.LINES_IN_RANGE
             )
             hl.gutterIconRenderer = object : GutterIconRenderer() {
@@ -185,12 +270,15 @@ class BookmarkHighlighterService(private val project: Project) {
                             }
                         }
                     })
-                    group.add(object : com.intellij.openapi.actionSystem.AnAction("Add Child Bookmark") {
+                    group.add(object : com.intellij.openapi.actionSystem.AnAction("Add Bookmark After This Node") {
                         override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
                             scope.launch {
-                                val parentId = entry.nodeId
+                                val pos = withContext(Dispatchers.IO) {
+                                    locator.bookmarkRepository.getInsertPositionAfterNode(entry.nodeId)
+                                }
+                                val (parentId, insertIndex) = pos ?: (entry.nodeId to null)
                                 val child = BookmarkNode.Bookmark(name = "New Bookmark", filePath = entry.filePath, line = entry.line)
-                                viewModel.processIntent(BookmarkIntent.CreateBookmark(parentId, child, null))
+                                viewModel.processIntent(BookmarkIntent.CreateBookmark(parentId, child, insertIndex))
                             }
                         }
                     })
@@ -204,7 +292,7 @@ class BookmarkHighlighterService(private val project: Project) {
                     return group
                 }
 
-                override fun isNavigateAction() = true
+                override fun isNavigateAction() = false
                 override fun equals(other: Any?): Boolean = other is BookmarkGutterRenderer && other.id == entry.nodeId
                 override fun hashCode(): Int = entry.nodeId.hashCode()
             }.let { BookmarkGutterRenderer(entry.nodeId, it) }

@@ -69,6 +69,21 @@ class BookmarkViewModel(
         this.documentListener = listener
     }
 
+    /** Returns (parentId, insertIndex) from domain model so new node is placed after the selected one. */
+    suspend fun getInsertionTarget(lastSelectedNodeId: String?): Pair<String?, Int?> {
+        if (lastSelectedNodeId == null) return "root" to null
+        return withContext(dispatchers.io) {
+            val node = bookmarkRepository.findByUuid(lastSelectedNodeId) ?: return@withContext "root" to null
+            when (node) {
+                is BookmarkNode.Group -> node.uuid to node.children.size
+                is BookmarkNode.Process -> node.uuid to node.steps.size
+                is BookmarkNode.Bookmark, is BookmarkNode.DescriptiveBookmark ->
+                    bookmarkRepository.getInsertPositionAfterNode(lastSelectedNodeId) ?: ("root" to null)
+                else -> "root" to null
+            }
+        }
+    }
+
     fun processIntent(intent: BookmarkIntent) {
         logger.info("[PROCESS_INTENT] Received intent: ${intent.javaClass.simpleName}")
         scope.launch {
@@ -294,6 +309,8 @@ class BookmarkViewModel(
         
         logger.info("[CREATE_BOOKMARK] Step 7: Emitting RefreshInlays side effect - filePath=${bookmark.filePath}")
         _sideEffects.emit(BookmarkSideEffect.RefreshInlays(bookmark.filePath))
+        
+        _sideEffects.emit(BookmarkSideEffect.RefreshGutterForFile(bookmark.filePath))
         
         logger.info("[CREATE_BOOKMARK] Step 8: Notifying document listener - filePath=${bookmark.filePath}")
         documentListener?.onBookmarksChanged(bookmark.filePath)
@@ -600,6 +617,8 @@ sealed class BookmarkSideEffect {
     data class RefreshInlays(val filePath: String) : BookmarkSideEffect()
     /** 全量刷新 gutter：清缓存 + 全量 daemon 重启 */
     data object RefreshGutterAll : BookmarkSideEffect()
+    /** 按文件立即刷新 gutter（新增书签后即时展示） */
+    data class RefreshGutterForFile(val filePath: String) : BookmarkSideEffect()
     /** 刷新打开的 bookmarkx.json 编辑器 */
     data object RefreshBookmarkxJson : BookmarkSideEffect()
 }

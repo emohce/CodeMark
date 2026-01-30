@@ -29,10 +29,14 @@ class BookmarkInlayRenderer(
     private val viewModel: BookmarkViewModel
 ) : InlayPresentation {
 
+    private companion object {
+        const val ICON_TEXT_GAP = 2
+    }
+
     // Gutter icon is displayed via BookmarkHighlighterService (RangeHighlighter)
     // Here we also display a small blue info icon at line end, followed by text with remarkInlay style
     private val icon = AllIcons.General.Information // Blue info icon
-    private val text = " $label "
+    private val text = "$label "
 
     private var isHovered = false
     private var textStartX = 0
@@ -41,7 +45,7 @@ class BookmarkInlayRenderer(
         get() {
             val font = getFont()
             val metrics = getFontMetrics(font)
-            return icon.iconWidth + metrics.charWidth(' ') + metrics.stringWidth(text)
+            return icon.iconWidth + ICON_TEXT_GAP + metrics.stringWidth(text)
         }
 
     override val height: Int
@@ -61,7 +65,7 @@ class BookmarkInlayRenderer(
         
         // Draw blue info icon
         icon.paintIcon(editor.component, g, curX, getIconY(icon))
-        curX += icon.iconWidth + metrics.charWidth(' ')
+        curX += icon.iconWidth + ICON_TEXT_GAP
         
         // Draw text with remarkInlay style
         textStartX = curX

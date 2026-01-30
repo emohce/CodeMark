@@ -33,6 +33,7 @@ import emohce.presentation.toolwindow.BookmarkIntent
 import emohce.presentation.toolwindow.BookmarkSideEffect
 import emohce.presentation.toolwindow.BookmarkViewModel
 import emohce.presentation.toolwindow.BookmarkViewState
+import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 import emohce.presentation.toolwindow.panel.render.BookmarkTreeCellRenderer
 import emohce.presentation.toolwindow.panel.util.BookmarkTreeUtil
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +42,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
 import java.awt.FlowLayout
 import java.awt.BasicStroke
@@ -319,18 +322,23 @@ class BookmarkPanel(
             viewModel.processIntent(BookmarkIntent.Refresh)
             val found = selectNodeById(req.nodeId)
             if (found) {
+                SelectionBus.getInstance(project).setLastSelectedNodeId(req.nodeId)
                 selectNodeWithRetry(req.nodeId)
             } else {
                 // Gutter click: expand by domain path so inner nodes under collapsed groups are selected
                 if (expandToNodeByDomainPath(req.nodeId)) {
+                    SelectionBus.getInstance(project).setLastSelectedNodeId(req.nodeId)
                     return@onEach
                 }
                 val byIndex = req.filePath?.let { path -> indexService.firstMatch(path, req.line)?.nodeId }
                 val resolvedId = byIndex
                 if (resolvedId != null) {
+                    SelectionBus.getInstance(project).setLastSelectedNodeId(resolvedId)
                     selectNodeWithRetry(resolvedId)
                 } else if (req.filePath != null) {
-                    selectNodeByPathAndLine(req.filePath, req.line)
+                    if (selectNodeByPathAndLine(req.filePath, req.line)) {
+                        selectedNode()?.uuid?.let { SelectionBus.getInstance(project).setLastSelectedNodeId(it) }
+                    }
                 }
             }
         }.launchIn(scope)
@@ -883,35 +891,43 @@ class BookmarkPanel(
     }
 
     private fun createGroup() {
-        val name = Messages.showInputDialog(project, "Group name:", "Create Group", null) ?: return
-        if (name.isBlank()) return
-        val (parentId, insertIndex) = insertionTarget()
-        val group = BookmarkNode.Group(name = name.trim())
-        viewModel.processIntent(BookmarkIntent.CreateGroup(parentId, group, insertIndex))
-        SelectionBus.getInstance(project).requestSelect(group.uuid)
+        scope.launch {
+            val (parentId, insertIndex) = viewModel.getInsertionTarget(SelectionBus.getInstance(project).getLastSelectedNodeId())
+            withContext(Dispatchers.Main) {
+                val name = Messages.showInputDialog(project, "Group name:", "Create Group", null) ?: return@withContext
+                if (name.isBlank()) return@withContext
+                val group = BookmarkNode.Group(name = name.trim())
+                viewModel.processIntent(BookmarkIntent.CreateGroup(parentId, group, insertIndex))
+                SelectionBus.getInstance(project).requestSelect(group.uuid)
+            }
+        }
     }
 
     private fun createProcess() {
-        val name = Messages.showInputDialog(project, "Process name:", "Create Process", null) ?: return
-        if (name.isBlank()) return
-        val description = Messages.showInputDialog(project, "Description:", "Create Process", null) ?: ""
-        val entryPath = Messages.showInputDialog(project, "Entry file path (optional):", "Create Process", null)
-        val entryLineText = Messages.showInputDialog(project, "Entry line (optional):", "Create Process", null)
-        val entryLine = entryLineText?.toIntOrNull()
-        if (!entryPath.isNullOrBlank() && !ensureFileExists(entryPath, "Create Process")) return
-        val (parentId, insertIndex) = insertionTarget()
-        val process = BookmarkNode.Process(
-            name = name.trim(),
-            description = description,
-            entryFilePath = entryPath?.takeIf { it.isNotBlank() },
-            entryLine = entryLine
-        )
-        viewModel.processIntent(BookmarkIntent.CreateProcess(parentId, process, insertIndex))
-        SelectionBus.getInstance(project).requestSelect(process.uuid)
+        scope.launch {
+            val (parentId, insertIndex) = viewModel.getInsertionTarget(SelectionBus.getInstance(project).getLastSelectedNodeId())
+            withContext(Dispatchers.Main) {
+                val name = Messages.showInputDialog(project, "Process name:", "Create Process", null) ?: return@withContext
+                if (name.isBlank()) return@withContext
+                val description = Messages.showInputDialog(project, "Description:", "Create Process", null) ?: ""
+                val entryPath = Messages.showInputDialog(project, "Entry file path (optional):", "Create Process", null)
+                val entryLineText = Messages.showInputDialog(project, "Entry line (optional):", "Create Process", null)
+                val entryLine = entryLineText?.toIntOrNull()
+                if (!entryPath.isNullOrBlank() && !ensureFileExists(entryPath, "Create Process")) return@withContext
+                val process = BookmarkNode.Process(
+                    name = name.trim(),
+                    description = description,
+                    entryFilePath = entryPath?.takeIf { it.isNotBlank() },
+                    entryLine = entryLine
+                )
+                viewModel.processIntent(BookmarkIntent.CreateProcess(parentId, process, insertIndex))
+                SelectionBus.getInstance(project).requestSelect(process.uuid)
+            }
+        }
     }
 
     /** Default file path for new bookmark: same file as selected node or its container (so new bookmark is in that directory). */
-    private fun defaultFilePathForNewBookmark(): String? {
+    private fun defaultFilePathForNewBookmark(parentId: String? = null): String? {
         val selected = selectedNode()
         val fromSelected = when (selected) {
             is BookmarkNode.Bookmark -> selected.filePath
@@ -919,8 +935,7 @@ class BookmarkPanel(
             else -> null
         }
         if (!fromSelected.isNullOrBlank()) return fromSelected
-        val (parentId, _) = insertionTarget()
-        val pid = parentId ?: return null
+        val pid = parentId ?: insertionTarget().first ?: return null
         val parentNode = currentRoot?.let { findNodeInTree(it, pid) } ?: return null
         return when (parentNode) {
             is BookmarkNode.Bookmark -> parentNode.filePath
@@ -930,33 +945,41 @@ class BookmarkPanel(
     }
 
     private fun createBookmark() {
-        val name = Messages.showInputDialog(project, "CodeMark name:", "Create CodeMark", null) ?: return
-        if (name.isBlank()) return
-        val defaultPath = defaultFilePathForNewBookmark()
-        val pathPrompt = if (!defaultPath.isNullOrBlank()) "File path:\n(Default: $defaultPath)" else "File path:"
-        val filePath = Messages.showInputDialog(project, pathPrompt, "Create CodeMark", null) ?: return
-        if (!ensureFileExists(filePath, "Create CodeMark")) return
-        val lineText = Messages.showInputDialog(project, "Line number:", "Create CodeMark", null) ?: "0"
-        val line = (lineText.toIntOrNull() ?: 0).coerceAtLeast(0)
-        val (parentId, insertIndex) = insertionTarget()
-        val bookmark = BookmarkNode.Bookmark(name = name.trim(), filePath = filePath.trim(), line = line)
-        viewModel.processIntent(BookmarkIntent.CreateBookmark(parentId, bookmark, insertIndex))
-        SelectionBus.getInstance(project).requestSelect(bookmark.uuid)
+        scope.launch {
+            val (parentId, insertIndex) = viewModel.getInsertionTarget(SelectionBus.getInstance(project).getLastSelectedNodeId())
+            withContext(Dispatchers.Main) {
+                val name = Messages.showInputDialog(project, "CodeMark name:", "Create CodeMark", null) ?: return@withContext
+                if (name.isBlank()) return@withContext
+                val defaultPath = defaultFilePathForNewBookmark(parentId)
+                val pathPrompt = if (!defaultPath.isNullOrBlank()) "File path:\n(Default: $defaultPath)" else "File path:"
+                val filePath = Messages.showInputDialog(project, pathPrompt, "Create CodeMark", null) ?: return@withContext
+                if (!ensureFileExists(filePath, "Create CodeMark")) return@withContext
+                val lineText = Messages.showInputDialog(project, "Line number:", "Create CodeMark", null) ?: "0"
+                val line = (lineText.toIntOrNull() ?: 0).coerceAtLeast(0)
+                val bookmark = BookmarkNode.Bookmark(name = name.trim(), filePath = filePath.trim(), line = line)
+                viewModel.processIntent(BookmarkIntent.CreateBookmark(parentId, bookmark, insertIndex))
+                SelectionBus.getInstance(project).requestSelect(bookmark.uuid)
+            }
+        }
     }
 
     private fun createDescriptive() {
-        val name = Messages.showInputDialog(project, "Note title:", "Create Note", null) ?: return
-        if (name.isBlank()) return
-        val description = Messages.showInputDialog(project, "Description:", "Create Note", null) ?: ""
-        val markdown = Messages.showInputDialog(project, "Markdown:", "Create Note", null) ?: ""
-        val (parentId, insertIndex) = insertionTarget()
-        val note = BookmarkNode.DescriptiveBookmark(
-            name = name.trim(),
-            description = description.trim(),
-            markdownContent = markdown
-        )
-        viewModel.processIntent(BookmarkIntent.CreateDescriptive(parentId, note, insertIndex))
-        SelectionBus.getInstance(project).requestSelect(note.uuid)
+        scope.launch {
+            val (parentId, insertIndex) = viewModel.getInsertionTarget(SelectionBus.getInstance(project).getLastSelectedNodeId())
+            withContext(Dispatchers.Main) {
+                val name = Messages.showInputDialog(project, "Note title:", "Create Note", null) ?: return@withContext
+                if (name.isBlank()) return@withContext
+                val description = Messages.showInputDialog(project, "Description:", "Create Note", null) ?: ""
+                val markdown = Messages.showInputDialog(project, "Markdown:", "Create Note", null) ?: ""
+                val note = BookmarkNode.DescriptiveBookmark(
+                    name = name.trim(),
+                    description = description.trim(),
+                    markdownContent = markdown
+                )
+                viewModel.processIntent(BookmarkIntent.CreateDescriptive(parentId, note, insertIndex))
+                SelectionBus.getInstance(project).requestSelect(note.uuid)
+            }
+        }
     }
 
     private fun editSelected() {
@@ -1662,7 +1685,7 @@ class BookmarkPanel(
         val menu = JPopupMenu()
         menu.add(actionItem("Add Group") { createGroup() })
 //        menu.add(actionItem("Add Process") { createProcess() })
-//        menu.add(actionItem("Add Bookmark") { createBookmark() })
+        menu.add(actionItem("Add CodeMark") { createBookmark() })
         menu.add(actionItem("Add Note") { createDescriptive() })
         menu.addSeparator()
         menu.add(actionItem("Edit") { editSelected() })
@@ -1854,6 +1877,9 @@ class BookmarkPanel(
             is BookmarkSideEffect.RefreshGutterAll -> {
                 // Gutter 由 BookmarkHighlighterService 单源刷新（RangeHighlighter），不再使用 LineMarkerProvider/daemon
             }
+            is BookmarkSideEffect.RefreshGutterForFile -> {
+                BookmarkHighlighterService.getInstance(project).refreshGutterForFile(effect.filePath)
+            }
             is BookmarkSideEffect.RefreshBookmarkxJson -> {
                 // 刷新打开的 bookmarkx.json 文件编辑器
                 val basePath = project.basePath ?: return
@@ -1926,6 +1952,7 @@ class BookmarkPanel(
                     }
                 }
             }
+            BookmarkHighlighterService.getInstance(project).flashLineForFile(filePath, line.coerceAtLeast(0))
             logger.info("navigateToFile: navigation completed")
         }
     }

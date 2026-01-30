@@ -39,6 +39,17 @@ class BookmarkRepositoryImpl(private val store: BookmarkStore) : BookmarkReposit
         return findParentInternal(store.root, nodeId)
     }
 
+    override suspend fun getInsertPositionAfterNode(nodeId: String): Pair<String?, Int?>? {
+        if (nodeId == "root") return null
+        val parent = findParentInternal(store.root, nodeId) ?: return null
+        val idx = when (parent) {
+            is BookmarkNode.Group -> parent.children.indexOfFirst { it.uuid == nodeId }
+            is BookmarkNode.Process -> parent.steps.indexOfFirst { it.uuid == nodeId }
+            else -> -1
+        }
+        return if (idx >= 0) parent.uuid to (idx + 1) else null
+    }
+
     override suspend fun search(query: String, limit: Int): List<BookmarkNode> {
         if (query.isBlank()) return emptyList()
         val results = mutableListOf<BookmarkNode>()
