@@ -12,7 +12,7 @@ import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 
 class CodeRemarkTourToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
-        val locator = ServiceLocator(project)
+        val locator = ServiceLocator.get(project)
         val viewModel = BookmarkViewModel(
             project = project,
             bookmarkRepository = locator.bookmarkRepository,

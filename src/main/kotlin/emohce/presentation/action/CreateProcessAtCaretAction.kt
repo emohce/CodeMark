@@ -1,4 +1,4 @@
-﻿package emohce.presentation.action
+package emohce.presentation.action
 
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
@@ -33,7 +33,7 @@ class CreateProcessAtCaretAction : AnAction() {
 
         val parentId = SelectionBus.getInstance(project).getCurrentContainerId()
         runBlocking {
-            val locator = ServiceLocator(project)
+            val locator = ServiceLocator.get(project)
             locator.bookmarkRepository.create(process, parentId)
         }
 

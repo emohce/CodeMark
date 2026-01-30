@@ -190,7 +190,7 @@ class BookmarkNavigationListener(private val project: Project) {
      */
     private suspend fun findBookmarkByFileAndLine(filePath: String, line: Int): BookmarkNode.Bookmark? {
         return withContext(Dispatchers.IO) {
-            val locator = ServiceLocator(project)
+            val locator = ServiceLocator.get(project)
             val root = locator.bookmarkRepository.getRootNode()
             val normalizedPath = FileUtil.toSystemIndependentName(filePath)
             
@@ -222,7 +222,7 @@ class BookmarkNavigationListener(private val project: Project) {
                 delay(150)
                 
                 // 定位到对应节点（这会自动展开路径并聚焦）
-                val locator = ServiceLocator(project)
+                val locator = ServiceLocator.get(project)
                 locator.bookmarkViewModel.processIntent(BookmarkIntent.SelectNode(uuid))
                 
                 logger.info("[BOOKMARK_NAV] SelectNode intent sent for UUID: $uuid")

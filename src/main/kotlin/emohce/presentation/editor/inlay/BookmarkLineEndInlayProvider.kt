@@ -90,14 +90,14 @@ class BookmarkLineEndInlayProvider : InlayHintsProvider<LineEndSettings> {
                 if (indexed.isNotEmpty()) return@withContext indexed
 
                 // Fallback to repository traversal if index empty
-                val locator = ServiceLocator(file.project)
+                val locator = ServiceLocator.get(file.project)
                 val root = locator.bookmarkRepository.getRootNode()
                 collectHints(root, normalizedPath)
             }
         }
         if (hints.isEmpty()) return null
 
-        val viewModel = ServiceLocator(file.project).bookmarkViewModel
+        val viewModel = ServiceLocator.get(file.project).bookmarkViewModel
 
         return object : FactoryInlayHintsCollector(editor) {
             private var collected = false

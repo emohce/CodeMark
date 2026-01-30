@@ -43,7 +43,7 @@ class CreateBookmarkAtCaretAction : AnAction() {
         logger.info("[ACTION_CREATE_BOOKMARK] Bookmark created with uuid=${bookmark.uuid}")
 
         runBlocking {
-            val locator = ServiceLocator(project)
+            val locator = ServiceLocator.get(project)
             val (parentId, insertIndex) = locator.bookmarkViewModel.getInsertionTarget(
                 SelectionBus.getInstance(project).getLastSelectedNodeId()
             )

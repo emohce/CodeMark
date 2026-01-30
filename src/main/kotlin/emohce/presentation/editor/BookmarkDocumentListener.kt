@@ -83,7 +83,7 @@ class BookmarkDocumentListener(private val project: Project) {
         // 检查文件是否有书签
         scope.launch {
             val hasBookmarks = withContext(Dispatchers.IO) {
-                val locator = ServiceLocator(project)
+                val locator = ServiceLocator.get(project)
                 val root = locator.bookmarkRepository.getRootNode()
                 val bookmarks = collectBookmarksForFile(root, filePath)
                 fileBookmarks[filePath] = bookmarks.toMutableList()
@@ -133,7 +133,7 @@ class BookmarkDocumentListener(private val project: Project) {
         
         // 重新加载该文件的书签
         scope.launch {
-            val locator = ServiceLocator(project)
+            val locator = ServiceLocator.get(project)
             val root = withContext(Dispatchers.IO) {
                 locator.bookmarkRepository.getRootNode()
             }

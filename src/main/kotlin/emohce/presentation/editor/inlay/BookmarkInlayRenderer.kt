@@ -110,7 +110,7 @@ class BookmarkInlayRenderer(
 
     private fun showEditPopup() {
         runBlocking {
-            val locator = ServiceLocator(project)
+            val locator = ServiceLocator.get(project)
             val node = locator.bookmarkRepository.findByUuid(nodeId) ?: return@runBlocking
 
             val updated = when (node) {
@@ -127,7 +127,7 @@ class BookmarkInlayRenderer(
 
     private fun showDeleteConfirmation() {
         runBlocking {
-            val locator = ServiceLocator(project)
+            val locator = ServiceLocator.get(project)
             val node = locator.bookmarkRepository.findByUuid(nodeId) ?: return@runBlocking
             
             if (node.uuid == "root") return@runBlocking

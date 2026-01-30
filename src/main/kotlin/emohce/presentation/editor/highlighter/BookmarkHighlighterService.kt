@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicReference
 class BookmarkHighlighterService(private val project: Project) {
     private val logger = Logger.getInstance(BookmarkHighlighterService::class.java)
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private val locator by lazy { ServiceLocator(project) }
+    private val locator by lazy { ServiceLocator.get(project) }
     private val selectionBus by lazy { SelectionBus.getInstance(project) }
     private val toolWindowManager by lazy { ToolWindowManager.getInstance(project) }
     private val viewModel by lazy { locator.bookmarkViewModel }
