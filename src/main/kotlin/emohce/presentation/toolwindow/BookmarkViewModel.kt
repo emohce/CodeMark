@@ -310,8 +310,6 @@ class BookmarkViewModel(
         logger.info("[CREATE_BOOKMARK] Step 7: Emitting RefreshInlays side effect - filePath=${bookmark.filePath}")
         _sideEffects.emit(BookmarkSideEffect.RefreshInlays(bookmark.filePath))
         
-        _sideEffects.emit(BookmarkSideEffect.RefreshGutterForFile(bookmark.filePath))
-        
         logger.info("[CREATE_BOOKMARK] Step 8: Notifying document listener - filePath=${bookmark.filePath}")
         documentListener?.onBookmarksChanged(bookmark.filePath)
         

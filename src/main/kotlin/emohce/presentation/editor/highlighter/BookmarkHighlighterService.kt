@@ -1,7 +1,5 @@
 package emohce.presentation.editor.highlighter
 
-import com.intellij.openapi.application.ApplicationManager
-import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
@@ -29,13 +27,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.event.ActionEvent
-import javax.swing.JComponent
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicReference
 
 @Service(Service.Level.PROJECT)
 class BookmarkHighlighterService(private val project: Project) {
@@ -46,23 +45,26 @@ class BookmarkHighlighterService(private val project: Project) {
     private val toolWindowManager by lazy { ToolWindowManager.getInstance(project) }
     private val viewModel by lazy { locator.bookmarkViewModel }
     private val editorHighlighters = mutableMapOf<Editor, MutableList<com.intellij.openapi.editor.markup.RangeHighlighter>>()
-    private val fileIndex = ConcurrentHashMap<String, List<MarkerEntry>>()
+    private val fileIndex = AtomicReference<Map<String, List<MarkerEntry>>>(emptyMap())
     private val pendingEditors = ConcurrentLinkedQueue<Pair<Editor, VirtualFile>>()
     @Volatile private var started = false
     /** Gutter/hints only paint after first rebuild; avoids empty/wrong flash at startup. */
     @Volatile private var indexReady = false
+    private val rebuildChannel = Channel<Unit>(Channel.CONFLATED)
 
     fun start() {
         if (started) return
         started = true
         logger.info("[GUTTER_HIGHLIGHT] service start")
+        startRebuildProcessor()
         listenEditors()
         listenRepository()
-        rebuildIndex()
+        requestRebuild()
     }
 
     fun dispose() {
         clearAll()
+        rebuildChannel.close()
         scope.cancel()
     }
 
@@ -91,9 +93,9 @@ class BookmarkHighlighterService(private val project: Project) {
 
     private fun listenRepository() {
         scope.launch {
-            locator.bookmarkRepository.observeChanges().collectLatest { event ->
+            locator.bookmarkRepository.observeChanges().collect { event ->
                 logger.info("[GUTTER_HIGHLIGHT] repo event=${event.javaClass.simpleName}")
-                rebuildIndex()
+                requestRebuild()
             }
         }
     }
@@ -117,7 +119,7 @@ class BookmarkHighlighterService(private val project: Project) {
     private fun doRefreshEditor(editor: Editor, file: VirtualFile) {
         scope.launch {
             val normalized = FileUtil.toSystemIndependentName(file.path)
-            val entries = withContext(Dispatchers.IO) { fileIndex[normalized].orEmpty() }
+            val entries = withContext(Dispatchers.IO) { fileIndex.get()[normalized].orEmpty() }
             try {
                 applyHighlighters(editor, entries)
             } catch (_: Exception) {
@@ -198,15 +200,29 @@ class BookmarkHighlighterService(private val project: Project) {
         return list.sortedBy { it.line }
     }
 
-    private fun rebuildIndex() {
-        scope.launch(Dispatchers.IO) {
-            val map = mutableMapOf<String, MutableList<MarkerEntry>>()
-            val root = locator.bookmarkRepository.getRootNode()
-            traverse(root) { node ->
+    private fun startRebuildProcessor() {
+        scope.launch {
+            for (signal in rebuildChannel) {
+                delay(50)
+                while (rebuildChannel.tryReceive().isSuccess) { /* drain */ }
+                rebuildIndexInternal()
+            }
+        }
+    }
+
+    private fun requestRebuild() {
+        rebuildChannel.trySend(Unit)
+    }
+
+    private suspend fun rebuildIndexInternal() {
+        val (root, map) = withContext(Dispatchers.IO) {
+            val built = mutableMapOf<String, MutableList<MarkerEntry>>()
+            val rootNode = locator.bookmarkRepository.getRootNode()
+            traverse(rootNode) { node ->
                 when (node) {
                     is BookmarkNode.Bookmark -> {
                         val path = FileUtil.toSystemIndependentName(node.filePath)
-                        map.getOrPut(path) { mutableListOf() }
+                        built.getOrPut(path) { mutableListOf() }
                             .add(MarkerEntry(node.uuid, node.name, node.line, node.filePath))
                     }
                     is BookmarkNode.Process -> {
@@ -214,23 +230,23 @@ class BookmarkHighlighterService(private val project: Project) {
                         val entryLine = node.entryLine
                         if (entryPath != null && entryLine != null) {
                             val path = FileUtil.toSystemIndependentName(entryPath)
-                            map.getOrPut(path) { mutableListOf() }
+                            built.getOrPut(path) { mutableListOf() }
                                 .add(MarkerEntry(node.uuid, node.name, entryLine, entryPath))
                         }
                     }
                     else -> Unit
                 }
             }
-            map.forEach { (k, v) -> v.sortBy { it.line } }
-            fileIndex.clear()
-            fileIndex.putAll(map)
-            BookmarkIndexService.getInstance(project).rebuild(root)
-            indexReady = true
-            logger.info("[GUTTER_HIGHLIGHT] index rebuilt files=${map.size}")
-            ApplicationManager.getApplication().invokeLater({
-                processPendingEditors()
-                refreshOpenEditors()
-            }, ModalityState.any())
+            built.forEach { (_, v) -> v.sortBy { it.line } }
+            rootNode to built
+        }
+        fileIndex.set(map)
+        withContext(Dispatchers.IO) { BookmarkIndexService.getInstance(project).rebuild(root) }
+        indexReady = true
+        logger.info("[GUTTER_HIGHLIGHT] index rebuilt files=${map.size}")
+        withContext(Dispatchers.Main) {
+            processPendingEditors()
+            refreshOpenEditors()
         }
     }
 
