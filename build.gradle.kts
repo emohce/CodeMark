@@ -63,6 +63,17 @@ tasks {
     named("buildSearchableOptions") {
         enabled = false
     }
+
+    // Suppress "No remote API found" errors from bundled Kubernetes plugin when running IDE
+    named<org.gradle.api.tasks.JavaExec>("runIde") {
+        systemProperties["idea.suppress.frequent.exception.logging"] = "true"
+        jvmArgumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
+            listOf(
+                "-Didea.suppress.frequent.exception.logging=true",
+                "-Didea.kubernetes.enabled=false"
+            )
+        })
+    }
 }
 
 kotlin {

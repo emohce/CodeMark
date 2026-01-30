@@ -20,6 +20,7 @@ import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.icons.AllIcons
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
+import emohce.presentation.index.BookmarkIndexService
 import emohce.presentation.selection.SelectionBus
 import emohce.presentation.toolwindow.BookmarkIntent
 import emohce.presentation.toolwindow.BookmarkViewModel
@@ -45,6 +46,8 @@ class BookmarkHighlighterService(private val project: Project) {
     private val editorHighlighters = mutableMapOf<Editor, MutableList<com.intellij.openapi.editor.markup.RangeHighlighter>>()
     private val fileIndex = ConcurrentHashMap<String, List<MarkerEntry>>()
     @Volatile private var started = false
+    /** Gutter/hints only paint after first rebuild; avoids empty/wrong flash at startup. */
+    @Volatile private var indexReady = false
 
     fun start() {
         if (started) return
@@ -53,7 +56,7 @@ class BookmarkHighlighterService(private val project: Project) {
         rebuildIndex()
         listenEditors()
         listenRepository()
-        refreshOpenEditors()
+        // Gutter refresh only after index is ready (invokeLater in rebuildIndex())
     }
 
     fun dispose() {
@@ -102,6 +105,7 @@ class BookmarkHighlighterService(private val project: Project) {
     }
 
     private fun refreshEditor(editor: Editor, file: VirtualFile) {
+        if (!indexReady) return
         scope.launch {
             val normalized = FileUtil.toSystemIndependentName(file.path)
             val entries = withContext(Dispatchers.IO) { fileIndex[normalized].orEmpty() }
@@ -135,6 +139,8 @@ class BookmarkHighlighterService(private val project: Project) {
             map.forEach { (k, v) -> v.sortBy { it.line } }
             fileIndex.clear()
             fileIndex.putAll(map)
+            BookmarkIndexService.getInstance(project).rebuild(root)
+            indexReady = true
             logger.info("[GUTTER_HIGHLIGHT] index rebuilt files=${map.size}")
             ApplicationManager.getApplication().invokeLater({ refreshOpenEditors() }, ModalityState.NON_MODAL)
         }

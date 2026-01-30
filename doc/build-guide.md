@@ -105,6 +105,15 @@ build/
 | `runIde` | 运行带插件的 IDE（开发用） |
 | `buildSearchableOptions` | 构建可搜索选项 |
 
+### runIde 与 Kubernetes 错误抑制
+
+执行 `runIde` 时，IDE 内置的 Kubernetes 插件可能输出 “No remote API found” 的 `IllegalStateException`。项目已在 `build.gradle.kts` 中为 `runIde` 配置了 JVM 参数以抑制此类日志：
+
+- `idea.suppress.frequent.exception.logging=true`：抑制频繁异常日志
+- `idea.kubernetes.enabled=false`：关闭 Kubernetes 相关初始化
+
+无需额外操作，直接运行 `runIde` 即可。
+
 ### 发布到 JetBrains Marketplace
 
 如果需要发布到插件市场，需要：

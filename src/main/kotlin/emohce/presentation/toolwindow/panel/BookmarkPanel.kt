@@ -317,11 +317,14 @@ class BookmarkPanel(
 
         SelectionBus.getInstance(project).requests.onEach { req ->
             viewModel.processIntent(BookmarkIntent.Refresh)
-            val found: Boolean = selectNodeById(req.nodeId)
+            val found = selectNodeById(req.nodeId)
             if (found) {
-                // 继续使用带重试的选择，确保树更新后也能正确展开/定位
                 selectNodeWithRetry(req.nodeId)
             } else {
+                // Gutter click: expand by domain path so inner nodes under collapsed groups are selected
+                if (expandToNodeByDomainPath(req.nodeId)) {
+                    return@onEach
+                }
                 val byIndex = req.filePath?.let { path -> indexService.firstMatch(path, req.line)?.nodeId }
                 val resolvedId = byIndex
                 if (resolvedId != null) {
@@ -602,6 +605,77 @@ class BookmarkPanel(
         return success
     }
 
+    /** Domain path from root to node with [targetId] (inclusive), or null if not found. */
+    private fun pathFromRootTo(node: BookmarkNode, targetId: String): List<BookmarkNode>? {
+        if (node.uuid == targetId) return listOf(node)
+        return when (node) {
+            is BookmarkNode.Group -> {
+                for (c in node.children) {
+                    val sub = pathFromRootTo(c, targetId) ?: continue
+                    return listOf(node) + sub
+                }
+                null
+            }
+            is BookmarkNode.Process -> {
+                for (s in node.steps) {
+                    val sub = pathFromRootTo(s, targetId) ?: continue
+                    return listOf(node) + sub
+                }
+                null
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * Expand tree along domain path to [nodeId] and select that node (for gutter click).
+     * Populates lazy nodes so deep bookmarks under collapsed groups are found.
+     */
+    private fun expandToNodeByDomainPath(nodeId: String): Boolean {
+        val rootNode = currentRoot ?: return false
+        val path = pathFromRootTo(rootNode, nodeId) ?: return false
+        if (path.isEmpty()) return false
+        val treeRoot = treeModel.root as? DefaultMutableTreeNode ?: return false
+        if (path.size == 1) {
+            val pathTree = TreePath(treeRoot.path)
+            tree.selectionPath = pathTree
+            tree.expandPath(pathTree)
+            tree.scrollPathToVisible(pathTree)
+            highlightSelectedRow()
+            isSelectingFromSideEffect = true
+            javax.swing.SwingUtilities.invokeLater { isSelectingFromSideEffect = false }
+            return true
+        }
+        var currentTreeNode = treeRoot
+        for (i in 1 until path.size) {
+            val domainNode = path[i]
+            if (BookmarkTreeUtil.hasPlaceholder(currentTreeNode)) {
+                populateChildren(currentTreeNode, path[i - 1])
+            }
+            val childTreeNode = BookmarkTreeUtil.nodeChildren(currentTreeNode).firstOrNull {
+                BookmarkTreeUtil.getNodeView(it)?.node?.uuid == domainNode.uuid
+            } ?: return false
+            tree.expandPath(TreePath(childTreeNode.path))
+            currentTreeNode = childTreeNode
+        }
+        tree.selectionPath = TreePath(currentTreeNode.path)
+        tree.expandPath(tree.selectionPath)
+        tree.scrollPathToVisible(tree.selectionPath)
+        highlightSelectedRow()
+        isSelectingFromSideEffect = true
+        javax.swing.SwingUtilities.invokeLater { isSelectingFromSideEffect = false }
+        return true
+    }
+
+    /** After gutter-click selection: give tree focus and repaint so the selected bookmark row is clearly highlighted. */
+    private fun highlightSelectedRow() {
+        tree.requestFocusInWindow()
+        tree.selectionPath?.let { path ->
+            val rect = tree.getPathBounds(path)
+            if (rect != null) tree.repaint(rect)
+        } ?: tree.repaint()
+    }
+
     private fun selectNodeByPathAndLine(filePath: String, line: Int?): Boolean {
         logger.info("selectNodeByPathAndLine: fallback search for path=$filePath line=$line")
         val root = treeModel.root as? DefaultMutableTreeNode ?: return false
@@ -668,6 +742,7 @@ class BookmarkPanel(
                     }
                     tree.scrollPathToVisible(path)
                 } ?: logger.warn("[SELECT_NODE_RETRY] tree.selectionPath is null after selectNodeById")
+                highlightSelectedRow()
                 
                 // 在下一个事件循环中清除标志
                 javax.swing.SwingUtilities.invokeLater {
@@ -835,10 +910,31 @@ class BookmarkPanel(
         SelectionBus.getInstance(project).requestSelect(process.uuid)
     }
 
+    /** Default file path for new bookmark: same file as selected node or its container (so new bookmark is in that directory). */
+    private fun defaultFilePathForNewBookmark(): String? {
+        val selected = selectedNode()
+        val fromSelected = when (selected) {
+            is BookmarkNode.Bookmark -> selected.filePath
+            is BookmarkNode.Process -> selected.entryFilePath
+            else -> null
+        }
+        if (!fromSelected.isNullOrBlank()) return fromSelected
+        val (parentId, _) = insertionTarget()
+        val pid = parentId ?: return null
+        val parentNode = currentRoot?.let { findNodeInTree(it, pid) } ?: return null
+        return when (parentNode) {
+            is BookmarkNode.Bookmark -> parentNode.filePath
+            is BookmarkNode.Process -> parentNode.entryFilePath
+            else -> null
+        }
+    }
+
     private fun createBookmark() {
         val name = Messages.showInputDialog(project, "CodeMark name:", "Create CodeMark", null) ?: return
         if (name.isBlank()) return
-        val filePath = Messages.showInputDialog(project, "File path:", "Create CodeMark", null) ?: return
+        val defaultPath = defaultFilePathForNewBookmark()
+        val pathPrompt = if (!defaultPath.isNullOrBlank()) "File path:\n(Default: $defaultPath)" else "File path:"
+        val filePath = Messages.showInputDialog(project, pathPrompt, "Create CodeMark", null) ?: return
         if (!ensureFileExists(filePath, "Create CodeMark")) return
         val lineText = Messages.showInputDialog(project, "Line number:", "Create CodeMark", null) ?: "0"
         val line = (lineText.toIntOrNull() ?: 0).coerceAtLeast(0)
