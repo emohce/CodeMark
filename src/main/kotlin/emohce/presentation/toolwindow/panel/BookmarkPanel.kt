@@ -382,6 +382,34 @@ class BookmarkPanel(
         }
     }
 
+    /** Repaint selected row without stealing focus (keep editor focus). */
+    private fun highlightSelectedRow() {
+        tree.selectionPath?.let { path ->
+            tree.getPathBounds(path)?.let { tree.repaint(it) }
+        }
+    }
+
+    /** Select node by file path and (optional) line number; expands path but does not steal focus. */
+    private fun selectNodeByPathAndLine(filePath: String, line: Int?): Boolean {
+        val normalized = FileUtil.toSystemIndependentName(filePath)
+        val rootNode = treeModel.root as? DefaultMutableTreeNode ?: return false
+        val target = BookmarkTreeUtil.findNode(rootNode) { view ->
+            val node = view.node
+            when (node) {
+                is BookmarkNode.Bookmark -> FileUtil.toSystemIndependentName(node.filePath) == normalized && (line == null || node.line == line)
+                is BookmarkNode.Process -> node.entryFilePath != null && FileUtil.toSystemIndependentName(node.entryFilePath) == normalized && (line == null || node.entryLine == line)
+                else -> false
+            }
+        } ?: return false
+
+        val path = TreePath(target.path)
+        tree.selectionPath = path
+        tree.expandPath(path)
+        tree.scrollPathToVisible(path)
+        highlightSelectedRow()
+        return true
+    }
+
     private fun buildSearchTree(state: BookmarkViewState): DefaultMutableTreeNode {
         val root = DefaultMutableTreeNode("Search Results")
         val sourceRoot = currentRoot ?: return root
@@ -670,43 +698,7 @@ class BookmarkPanel(
         tree.expandPath(tree.selectionPath)
         tree.scrollPathToVisible(tree.selectionPath)
         highlightSelectedRow()
-        isSelectingFromSideEffect = true
-        javax.swing.SwingUtilities.invokeLater { isSelectingFromSideEffect = false }
         return true
-    }
-
-    /** After gutter-click selection: give tree focus and repaint so the selected bookmark row is clearly highlighted. */
-    private fun highlightSelectedRow() {
-        tree.requestFocusInWindow()
-        tree.selectionPath?.let { path ->
-            val rect = tree.getPathBounds(path)
-            if (rect != null) tree.repaint(rect)
-        } ?: tree.repaint()
-    }
-
-    private fun selectNodeByPathAndLine(filePath: String, line: Int?): Boolean {
-        logger.info("selectNodeByPathAndLine: fallback search for path=$filePath line=$line")
-        val root = treeModel.root as? DefaultMutableTreeNode ?: return false
-        val target = BookmarkTreeUtil.findNode(root) { view ->
-            val node = view.node
-            when (node) {
-                is BookmarkNode.Bookmark -> {
-                    node.filePath == filePath && (line == null || node.line == line)
-                }
-                is BookmarkNode.Process -> {
-                    node.entryFilePath == filePath && (line == null || node.entryLine == line)
-                }
-                else -> false
-            }
-        }
-        val nodeView = target?.userObject as? NodeView
-        val nodeId = nodeView?.node?.uuid
-        return if (nodeId != null) {
-            selectNodeWithRetry(nodeId, maxRetries = 3, delayMs = 100)
-            true
-        } else {
-            false
-        }
     }
     
     /**
