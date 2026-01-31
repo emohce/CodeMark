@@ -2,6 +2,7 @@ package emohce.presentation.editor
 
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Document
+import com.intellij.openapi.editor.RangeMarker
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -20,6 +21,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -34,11 +37,62 @@ class BookmarkDocumentListener(private val project: Project) {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val documentListeners = ConcurrentHashMap<Document, DocumentChangeListener>()
     private val fileBookmarks = ConcurrentHashMap<String, MutableList<BookmarkNode.Bookmark>>()
+    private val documentMarkers = ConcurrentHashMap<Document, FileMarkerState>()
     private var viewModel: BookmarkViewModel? = null
 
     init {
         setupFileEditorListener()
         loadBookmarksForAllOpenFiles()
+    }
+
+    private fun collectBookmarksForFile(root: BookmarkNode, targetPath: String): List<BookmarkNode.Bookmark> {
+        val normalizedTarget = FileUtil.toSystemIndependentName(targetPath)
+        val list = mutableListOf<BookmarkNode.Bookmark>()
+        fun traverse(node: BookmarkNode) {
+            when (node) {
+                is BookmarkNode.Bookmark -> {
+                    val path = FileUtil.toSystemIndependentName(node.filePath)
+                    if (path == normalizedTarget) list.add(node)
+                }
+                is BookmarkNode.Group -> node.children.forEach { traverse(it) }
+                is BookmarkNode.Process -> node.steps.forEach { traverse(it) }
+                else -> Unit
+            }
+        }
+        traverse(root)
+        return list
+    }
+
+    private fun ensureMarkers(document: Document, filePath: String, bookmarks: List<BookmarkNode.Bookmark>) {
+        val state = documentMarkers.getOrPut(document) { FileMarkerState(filePath) }
+        val normalizedPath = FileUtil.toSystemIndependentName(filePath)
+
+        // 删除不存在的书签 marker
+        val incomingIds = bookmarks.map { it.uuid }.toSet()
+        val toRemove = state.markers.keys - incomingIds
+        toRemove.forEach { id ->
+            state.markers.remove(id)?.marker?.dispose()
+        }
+
+        bookmarks.forEach { bookmark ->
+            val existing = state.markers[bookmark.uuid]
+            if (existing == null || !existing.marker.isValid) {
+                val line = bookmark.line
+                if (line >= 0 && line < document.lineCount) {
+                    val start = document.getLineStartOffset(line)
+                    val marker = document.createRangeMarker(start, start)
+                    marker.isGreedyToLeft = true
+                    marker.isGreedyToRight = true
+                    state.markers[bookmark.uuid] = MarkerInfo(bookmark, marker, line)
+                } else {
+                    logger.debug("Skip marker creation out of bounds path=$normalizedPath line=$line")
+                }
+            } else {
+                // 更新最新书签对象和行号基线
+                existing.bookmark = bookmark
+                existing.lastSyncedLine = existing.lastSyncedLine.coerceAtLeast(0)
+            }
+        }
     }
 
     fun setViewModel(viewModel: BookmarkViewModel) {
@@ -79,21 +133,24 @@ class BookmarkDocumentListener(private val project: Project) {
             return
         } ?: return
         val filePath = FileUtil.toSystemIndependentName(file.path)
-        
+
         // 检查文件是否有书签
         scope.launch {
-            val hasBookmarks = withContext(Dispatchers.IO) {
+            val hasBookmarks = withContext<Boolean>(Dispatchers.IO) {
                 val locator = ServiceLocator.get(project)
                 val root = locator.bookmarkRepository.getRootNode()
                 val bookmarks = collectBookmarksForFile(root, filePath)
                 fileBookmarks[filePath] = bookmarks.toMutableList()
                 bookmarks.isNotEmpty()
             }
-            
+
             if (hasBookmarks && !documentListeners.containsKey(document)) {
-                val listener = DocumentChangeListener(filePath, document)
-                documentListeners[document] = listener
-                document.addDocumentListener(listener, project)
+                withContext(Dispatchers.Main) {
+                    ensureMarkers(document, filePath, fileBookmarks[filePath].orEmpty())
+                    val listener = DocumentChangeListener(filePath, document)
+                    documentListeners[document] = listener
+                    document.addDocumentListener(listener, project)
+                }
             }
         }
     }
@@ -106,31 +163,13 @@ class BookmarkDocumentListener(private val project: Project) {
         }
         val filePath = FileUtil.toSystemIndependentName(file.path)
         fileBookmarks.remove(filePath)
-    }
-
-    private fun collectBookmarksForFile(root: BookmarkNode, filePath: String): List<BookmarkNode.Bookmark> {
-        val bookmarks = mutableListOf<BookmarkNode.Bookmark>()
-        traverse(root) { node ->
-            if (node is BookmarkNode.Bookmark && FileUtil.toSystemIndependentName(node.filePath) == filePath) {
-                bookmarks.add(node)
-            }
-        }
-        return bookmarks
-    }
-
-    private fun traverse(node: BookmarkNode, visitor: (BookmarkNode) -> Unit) {
-        visitor(node)
-        when (node) {
-            is BookmarkNode.Group -> node.children.forEach { traverse(it, visitor) }
-            is BookmarkNode.Process -> node.steps.forEach { traverse(it, visitor) }
-            else -> Unit
-        }
+        documentMarkers.remove(document)?.dispose()
     }
 
     fun onBookmarksChanged(filePath: String) {
         val normalizedPath = FileUtil.toSystemIndependentName(filePath)
         val file = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(normalizedPath) ?: return
-        
+
         // 重新加载该文件的书签
         scope.launch {
             val locator = ServiceLocator.get(project)
@@ -139,9 +178,15 @@ class BookmarkDocumentListener(private val project: Project) {
             }
             val bookmarks = collectBookmarksForFile(root, normalizedPath)
             fileBookmarks[normalizedPath] = bookmarks.toMutableList()
-            
+
             // 如果文件已打开，确保有监听器
             if (FileEditorManager.getInstance(project).isFileOpen(file)) {
+                withContext(Dispatchers.Main) {
+                    val document = FileDocumentManager.getInstance().getDocument(file)
+                    if (document != null) {
+                        ensureMarkers(document, normalizedPath, bookmarks)
+                    }
+                }
                 attachListenerToFile(file)
             }
         }
@@ -161,6 +206,7 @@ class BookmarkDocumentListener(private val project: Project) {
         private val document: Document
     ) : DocumentListener {
         private var isProcessing = false
+        private var flushJob: kotlinx.coroutines.Job? = null
 
         override fun documentChanged(event: DocumentEvent) {
             if (isProcessing) return
@@ -168,69 +214,25 @@ class BookmarkDocumentListener(private val project: Project) {
 
             try {
                 val normalizedPath = FileUtil.toSystemIndependentName(filePath)
-                val bookmarks = fileBookmarks[normalizedPath] ?: return
+                val state = documentMarkers[document] ?: return
 
-                val changeOffset = event.offset
-                val newLength = event.newLength
-                val oldLength = event.oldLength
-
-                val changeLine = document.getLineNumber(changeOffset)
-                val newText = if (newLength > 0) {
-                    document.charsSequence.subSequence(changeOffset, changeOffset + newLength).toString()
-                } else ""
-                val newNewlines = newText.count { it == '\n' }
-                val newLines = if (newLength > 0) newNewlines + 1 else 0
-
-                // oldLines 无旧片段时按 oldLength 估算；删除多行时可能不精确
-                val avgLineLength = if (document.lineCount > 0) {
-                    document.textLength / document.lineCount
-                } else 80
-                val oldLines = if (oldLength > 0) {
-                    maxOf(1, (oldLength + avgLineLength - 1) / maxOf(1, avgLineLength))
-                } else 0
-
-                val lineDelta = newLines - oldLines
-                if (lineDelta == 0) return
-
-                val lineStartOffset = document.getLineStartOffset(changeLine)
-                val bookmarksToUpdate = mutableListOf<Pair<BookmarkNode.Bookmark, Int>>()
-                val bookmarksToDelete = mutableListOf<BookmarkNode.Bookmark>()
-
-                bookmarks.forEach { bookmark ->
-                    val L = bookmark.line
-                    if (L < changeLine) return@forEach
-
-                    when {
-                        lineDelta > 0 -> {
-                            if (L == changeLine && changeOffset > lineStartOffset) return@forEach
-                            bookmarksToUpdate.add(bookmark to (L + lineDelta))
-                        }
-                        lineDelta < 0 -> {
-                            val deletedLines = -lineDelta
-                            if (L <= changeLine + oldLines - 1) {
-                                if (L == changeLine) {
-                                    bookmarksToDelete.add(bookmark)
-                                } else {
-                                    val newLine = L - deletedLines
-                                    if (newLine >= changeLine) bookmarksToUpdate.add(bookmark to newLine)
-                                    else bookmarksToDelete.add(bookmark)
-                                }
-                            } else {
-                                bookmarksToUpdate.add(bookmark to (L + lineDelta))
-                            }
+                // 检查失效 marker（被删除的行）
+                val invalid = state.markers.values.filter { !it.marker.isValid }
+                if (invalid.isNotEmpty()) {
+                    val bookmarksToDelete = invalid.mapNotNull { it.bookmark }
+                    invalid.forEach { info -> state.markers.remove(info.bookmark?.uuid)?.marker?.dispose() }
+                    if (bookmarksToDelete.isNotEmpty()) {
+                        SwingUtilities.invokeLater {
+                            handleBookmarksDeletion(bookmarksToDelete, normalizedPath)
                         }
                     }
                 }
 
-                if (bookmarksToDelete.isNotEmpty()) {
-                    SwingUtilities.invokeLater {
-                        handleBookmarksDeletion(bookmarksToDelete, normalizedPath)
-                    }
-                }
-                if (bookmarksToUpdate.isNotEmpty()) {
-                    scope.launch {
-                        updateBookmarkLines(bookmarksToUpdate)
-                    }
+                // 防抖写回行号
+                flushJob?.cancel()
+                flushJob = scope.launch {
+                    delay(180)
+                    flushMarkers(document, state)
                 }
             } finally {
                 isProcessing = false
@@ -256,12 +258,33 @@ class BookmarkDocumentListener(private val project: Project) {
             }
         }
 
-        private suspend fun updateBookmarkLines(updates: List<Pair<BookmarkNode.Bookmark, Int>>) {
+        private suspend fun flushMarkers(document: Document, state: FileMarkerState) {
             withContext(Dispatchers.IO) {
-                updates.forEach { (bookmark, newLine) ->
-                    viewModel?.processIntent(BookmarkIntent.UpdateBookmarkLineFromDocument(bookmark.uuid, newLine))
+                state.markers.values.forEach { info ->
+                    val marker = info.marker
+                    val bookmark = info.bookmark ?: return@forEach
+                    if (!marker.isValid) return@forEach
+                    val line = document.getLineNumber(marker.startOffset)
+                    if (line != info.lastSyncedLine) {
+                        viewModel?.processIntent(BookmarkIntent.UpdateBookmarkLineFromDocument(bookmark.uuid, line))
+                        info.lastSyncedLine = line
+                    }
                 }
             }
+        }
+    }
+
+    private data class MarkerInfo(
+        var bookmark: BookmarkNode.Bookmark?,
+        val marker: RangeMarker,
+        var lastSyncedLine: Int
+    )
+
+    private class FileMarkerState(val filePath: String) {
+        val markers: MutableMap<String, MarkerInfo> = ConcurrentHashMap()
+        fun dispose() {
+            markers.values.forEach { runCatching { it.marker.dispose() } }
+            markers.clear()
         }
     }
 }

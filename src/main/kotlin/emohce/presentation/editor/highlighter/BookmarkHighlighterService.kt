@@ -256,9 +256,10 @@ class BookmarkHighlighterService(private val project: Project) {
         val doc = editor.document
         val highlightList = mutableListOf<com.intellij.openapi.editor.markup.RangeHighlighter>()
         entries.forEach { entry ->
-            if (entry.line < 0 || entry.line >= doc.lineCount) return@forEach
-            val start = doc.getLineStartOffset(entry.line)
-            val end = doc.getLineEndOffset(entry.line)
+            val line = entry.lineProvider(doc) ?: return@forEach
+            if (line < 0 || line >= doc.lineCount) return@forEach
+            val start = doc.getLineStartOffset(line)
+            val end = doc.getLineEndOffset(line)
             val hl = editor.markupModel.addRangeHighlighter(
                 start,
                 end,
@@ -266,14 +267,16 @@ class BookmarkHighlighterService(private val project: Project) {
                 null,
                 HighlighterTargetArea.LINES_IN_RANGE
             )
+            hl.isGreedyToLeft = true
+            hl.isGreedyToRight = true
             hl.gutterIconRenderer = object : GutterIconRenderer() {
                 override fun getIcon() = AllIcons.Nodes.Bookmark
                 override fun getClickAction() = object : com.intellij.openapi.actionSystem.AnAction("Select Bookmark") {
                     override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
-                        logger.info("[GUTTER_HIGHLIGHT] click node=${entry.nodeId} line=${entry.line}")
+                        logger.info("[GUTTER_HIGHLIGHT] click node=${entry.nodeId} line=$line")
                         selectionBus.requestSelect(entry.nodeId)
                         toolWindowManager.getToolWindow("CodeRemarkTour")?.show(null)
-                        flashLine(editor, entry.line)
+                        flashLine(editor, line)
                     }
                 }
                 override fun getPopupMenuActions(): com.intellij.openapi.actionSystem.ActionGroup? {
@@ -293,7 +296,7 @@ class BookmarkHighlighterService(private val project: Project) {
                                     locator.bookmarkRepository.getInsertPositionAfterNode(entry.nodeId)
                                 }
                                 val (parentId, insertIndex) = pos ?: (entry.nodeId to null)
-                                val child = BookmarkNode.Bookmark(name = "New Bookmark", filePath = entry.filePath, line = entry.line)
+                                val child = BookmarkNode.Bookmark(name = "New Bookmark", filePath = entry.filePath, line = line)
                                 viewModel.processIntent(BookmarkIntent.CreateBookmark(parentId, child, insertIndex))
                             }
                         }
@@ -351,7 +354,8 @@ class BookmarkHighlighterService(private val project: Project) {
         val nodeId: String,
         val title: String,
         val line: Int,
-        val filePath: String
+        val filePath: String,
+        val lineProvider: (com.intellij.openapi.editor.Document) -> Int? = { line }
     )
 
     private data class BookmarkGutterRenderer(val id: String, val delegate: GutterIconRenderer) : GutterIconRenderer() {
