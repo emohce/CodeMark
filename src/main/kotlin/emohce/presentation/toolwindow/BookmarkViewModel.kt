@@ -101,6 +101,7 @@ class BookmarkViewModel(
                 is BookmarkIntent.CreateProcess -> handleCreateProcess(intent.parentId, intent.process, intent.insertIndex)
                 is BookmarkIntent.CreateDescriptive -> handleCreateDescriptive(intent.parentId, intent.note, intent.insertIndex)
                 is BookmarkIntent.EditNode -> handleEditNode(intent.node)
+                is BookmarkIntent.UpdateBookmarkLineFromDocument -> handleUpdateBookmarkLineFromDocument(intent.nodeId, intent.newLine)
                 is BookmarkIntent.MoveNode -> handleMoveNode(intent.nodeId, intent.newParentId, intent.newIndex)
                 is BookmarkIntent.DeleteNode -> handleDeleteNode(intent.nodeId)
                 is BookmarkIntent.CreateReference -> handleCreateReference(intent.sourceId, intent.targetId)
@@ -203,6 +204,22 @@ class BookmarkViewModel(
                             }
                             is BookmarkNode.Process -> {
                                 node.entryFilePath?.let { refreshInlaysAndGutter(it) }
+                            }
+                            else -> Unit
+                        }
+                    }
+                    is BookmarkEvent.NodeLineSynced -> {
+                        reloadBookmarks()
+                        when (val node = event.node) {
+                            is BookmarkNode.Bookmark -> {
+                                refreshInlaysAndGutter(node.filePath)
+                                documentListener?.onBookmarksChanged(node.filePath)
+                            }
+                            is BookmarkNode.Process -> {
+                                node.entryFilePath?.let { path ->
+                                    refreshInlaysAndGutter(path)
+                                    documentListener?.onBookmarksChanged(path)
+                                }
                             }
                             else -> Unit
                         }
@@ -368,6 +385,11 @@ class BookmarkViewModel(
                 _sideEffects.emit(BookmarkSideEffect.NavigateToFile(path, line, 0))
             }
         }
+    }
+
+    /** Document-driven line sync only; no NavigateToFile / SelectNode / RefreshBookmarkxJson. */
+    private suspend fun handleUpdateBookmarkLineFromDocument(nodeId: String, newLine: Int) {
+        bookmarkRepository.updateLineOnly(nodeId, newLine)
     }
 
     private suspend fun handleMoveNode(nodeId: String, newParentId: String?, newIndex: Int) {
@@ -585,6 +607,8 @@ sealed class BookmarkIntent {
     data class CreateProcess(val parentId: String?, val process: BookmarkNode.Process, val insertIndex: Int?) : BookmarkIntent()
     data class CreateDescriptive(val parentId: String?, val note: BookmarkNode.DescriptiveBookmark, val insertIndex: Int?) : BookmarkIntent()
     data class EditNode(val node: BookmarkNode) : BookmarkIntent()
+    /** Document-driven line sync only; no NavigateToFile / SelectNode. */
+    data class UpdateBookmarkLineFromDocument(val nodeId: String, val newLine: Int) : BookmarkIntent()
     data class MoveNode(val nodeId: String, val newParentId: String?, val newIndex: Int) : BookmarkIntent()
     data class DeleteNode(val nodeId: String) : BookmarkIntent()
     data class CreateReference(val sourceId: String, val targetId: String) : BookmarkIntent()

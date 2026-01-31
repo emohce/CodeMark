@@ -1,4 +1,4 @@
-﻿package emohce.domain.event
+package emohce.domain.event
 
 import emohce.domain.model.BookmarkNode
 import java.time.Instant
@@ -16,6 +16,12 @@ sealed class BookmarkEvent {
     data class NodeUpdated(
         val node: BookmarkNode,
         val previousNode: BookmarkNode?,
+        override val timestamp: Instant = Instant.now()
+    ) : BookmarkEvent()
+
+    /** Emitted when only line/entryLine was synced from document changes; no SelectNode/NavigateToFile. */
+    data class NodeLineSynced(
+        val node: BookmarkNode,
         override val timestamp: Instant = Instant.now()
     ) : BookmarkEvent()
 

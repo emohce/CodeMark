@@ -15,6 +15,8 @@ interface BookmarkRepository {
 
     suspend fun create(node: BookmarkNode, parentId: String?, index: Int? = null)
     suspend fun update(node: BookmarkNode)
+    /** Updates only line (Bookmark) or entryLine (Process) for document-driven sync; emits NodeLineSynced. */
+    suspend fun updateLineOnly(nodeId: String, newLine: Int)
     suspend fun delete(nodeId: String)
     suspend fun move(nodeId: String, newParentId: String?, newIndex: Int)
     suspend fun reorder(parentId: String, orderedChildIds: List<String>)

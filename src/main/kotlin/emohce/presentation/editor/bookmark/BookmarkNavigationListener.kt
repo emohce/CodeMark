@@ -54,31 +54,7 @@ class BookmarkNavigationListener(private val project: Project) {
             }
             
             override fun selectionChanged(event: com.intellij.openapi.fileEditor.FileEditorManagerEvent) {
-                // 当文件选择变化时，检查是否有书签导航
-                val newFile = event.newFile
-                val oldFile = event.oldFile
-                logger.info("[BOOKMARK_NAV] File selection changed: oldFile=${oldFile?.path}, newFile=${newFile?.path}")
-                
-                if (newFile != null) {
-                    val filePath = FileUtil.toSystemIndependentName(newFile.path)
-                    val newEditor = event.manager.getSelectedTextEditor()
-                    if (newEditor != null) {
-                        val line = newEditor.caretModel.primaryCaret.logicalPosition.line
-                        logger.info("[BOOKMARK_NAV] File selection changed: filePath=$filePath, line=$line")
-                        
-                        // 延迟检查，确保导航完成
-                        scope.launch {
-                            delay(150)
-                            val currentLine = newEditor.caretModel.primaryCaret.logicalPosition.line
-                            logger.info("[BOOKMARK_NAV] After selection change delay, current line=$currentLine, original line=$line")
-                            if (currentLine == line) {
-                                checkAndHandleBookmarkNavigation(filePath, line)
-                            }
-                        }
-                    } else {
-                        logger.debug("[BOOKMARK_NAV] No text editor found for file: $filePath")
-                    }
-                }
+                // 仅 gutter 点击驱动工具窗口选中；切换文件/标签页不再自动打开工具窗口
             }
         })
         
@@ -131,7 +107,7 @@ class BookmarkNavigationListener(private val project: Project) {
                 return
             }
             
-            // 检查是否有待处理的导航（从书签点击触发）
+            // 仅处理待办导航（如从面板“定位到行”后等光标到达再选中节点）；不因单纯光标移动打开工具窗口
             val key = "$filePath:$line"
             val uuid = pendingNavigation.remove(key)
             if (uuid != null) {
@@ -143,45 +119,8 @@ class BookmarkNavigationListener(private val project: Project) {
                 return
             }
             
-            // 检测快速跳转（可能是从书签点击触发）
-            // 条件：1) 有上一次行号记录 2) 行号发生变化 3) 在短时间内（1000ms）发生跳转
-            val isQuickJump = lastLine != null && 
-                             lastLine != line && 
-                             (currentTime - lastChangeTime) < 1000
-            
-            // 更新状态
-            val previousLine = lastLine
             lastLine = line
             lastChangeTime = currentTime
-            
-            // 如果是快速跳转，立即检查是否有书签
-            if (isQuickJump) {
-                logger.info("[BOOKMARK_NAV] Quick jump detected: filePath=$filePath, from line=$previousLine to line=$line, timeDiff=${currentTime - lastChangeTime}ms")
-                scope.launch {
-                    // 短暂延迟确保导航完成
-                    delay(100)
-                    
-                    // 再次检查当前行，确保还在同一位置
-                    val currentLine = editor.caretModel.primaryCaret.logicalPosition.line
-                    logger.info("[BOOKMARK_NAV] After delay, current line=$currentLine, original line=$line")
-                    if (currentLine == line) {
-                        checkAndHandleBookmarkNavigation(filePath, line)
-                    } else {
-                        logger.debug("[BOOKMARK_NAV] Line changed during delay, skipping check")
-                    }
-                }
-            } else {
-                // 即使不是快速跳转，也检查一下（可能是从其他文件跳转过来，或者用户手动导航）
-                logger.debug("[BOOKMARK_NAV] Normal position change: filePath=$filePath, line=$line, previousLine=$previousLine")
-                scope.launch {
-                    delay(200)
-                    val currentLine = editor.caretModel.primaryCaret.logicalPosition.line
-                    if (currentLine == line) {
-                        logger.info("[BOOKMARK_NAV] Checking bookmark after normal position change: filePath=$filePath, line=$line")
-                        checkAndHandleBookmarkNavigation(filePath, line)
-                    }
-                }
-            }
         }
     }
     

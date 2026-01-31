@@ -89,6 +89,19 @@ class BookmarkRepositoryImpl(private val store: BookmarkStore) : BookmarkReposit
         notifyObserved(node.uuid)
     }
 
+    override suspend fun updateLineOnly(nodeId: String, newLine: Int) {
+        val node = findByUuidInternal(store.root, nodeId) ?: return
+        val updated = when (node) {
+            is BookmarkNode.Bookmark -> node.copy(line = newLine)
+            is BookmarkNode.Process -> node.copy(entryLine = newLine)
+            else -> return
+        }
+        val root = replaceNode(store.root, updated) as BookmarkNode.Group
+        store.replaceRoot(root)
+        changes.tryEmit(BookmarkEvent.NodeLineSynced(updated))
+        notifyObserved(nodeId)
+    }
+
     override suspend fun delete(nodeId: String) {
         val parent = findParentInternal(store.root, nodeId)
         val root = removeNode(store.root, nodeId)
