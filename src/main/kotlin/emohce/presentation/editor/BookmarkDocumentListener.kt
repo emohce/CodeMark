@@ -201,6 +201,14 @@ class BookmarkDocumentListener(private val project: Project) {
         scope.cancel()
     }
 
+    fun flushForFile(filePath: String) {
+        val normalized = FileUtil.toSystemIndependentName(filePath)
+        val entry = documentMarkers.entries.firstOrNull { FileUtil.toSystemIndependentName(it.value.filePath) == normalized }
+        val document = entry?.key ?: return
+        val state = entry.value
+        runBlocking { flushMarkers(document, state) }
+    }
+
     private inner class DocumentChangeListener(
         private val filePath: String,
         private val document: Document
@@ -258,17 +266,18 @@ class BookmarkDocumentListener(private val project: Project) {
             }
         }
 
-        private suspend fun flushMarkers(document: Document, state: FileMarkerState) {
-            withContext(Dispatchers.IO) {
-                state.markers.values.forEach { info ->
-                    val marker = info.marker
-                    val bookmark = info.bookmark ?: return@forEach
-                    if (!marker.isValid) return@forEach
-                    val line = document.getLineNumber(marker.startOffset)
-                    if (line != info.lastSyncedLine) {
-                        viewModel?.processIntent(BookmarkIntent.UpdateBookmarkLineFromDocument(bookmark.uuid, line))
-                        info.lastSyncedLine = line
-                    }
+    }
+
+    private suspend fun flushMarkers(document: Document, state: FileMarkerState) {
+        withContext(Dispatchers.IO) {
+            state.markers.values.forEach { info ->
+                val marker = info.marker
+                val bookmark = info.bookmark ?: return@forEach
+                if (!marker.isValid) return@forEach
+                val line = document.getLineNumber(marker.startOffset)
+                if (line != info.lastSyncedLine) {
+                    viewModel?.processIntent(BookmarkIntent.UpdateBookmarkLineFromDocument(bookmark.uuid, line))
+                    info.lastSyncedLine = line
                 }
             }
         }

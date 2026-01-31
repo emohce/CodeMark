@@ -191,7 +191,10 @@ class BookmarkViewModel(
                             is BookmarkNode.Process -> node.entryFilePath
                             else -> null
                         }
-                        path?.let { refreshInlaysAndGutter(it) }
+                        path?.let { 
+                            refreshInlaysAndGutter(it)
+                            documentListener?.onBookmarksChanged(it)
+                        }
                     }
                     is BookmarkEvent.NodeUpdated -> {
                         reloadBookmarks()
@@ -292,6 +295,8 @@ class BookmarkViewModel(
     }
 
     private suspend fun refreshInlaysAndGutter(path: String) {
+        // Ensure document RangeMarkers are flushed so repo/index see latest lines before repaint
+        documentListener?.flushForFile(path)
         _sideEffects.emit(BookmarkSideEffect.RefreshInlays(path))
     }
     
