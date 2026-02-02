@@ -21,6 +21,7 @@ import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
 import emohce.presentation.index.BookmarkIndexService
 import emohce.presentation.selection.SelectionBus
+import emohce.presentation.toolwindow.BookmarkEditDialogUtil
 import emohce.presentation.toolwindow.BookmarkIntent
 import emohce.presentation.toolwindow.BookmarkViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -285,7 +286,16 @@ class BookmarkHighlighterService(private val project: Project) {
                         override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
                             scope.launch {
                                 val node = locator.bookmarkRepository.findByUuid(entry.nodeId) ?: return@launch
-                                viewModel.processIntent(BookmarkIntent.EditNode(node))
+                                val updated = withContext(Dispatchers.Main) {
+                                    when (node) {
+                                        is BookmarkNode.Bookmark -> BookmarkEditDialogUtil.editBookmark(project, node)
+                                        is BookmarkNode.DescriptiveBookmark -> BookmarkEditDialogUtil.editDescriptive(project, node)
+                                        is BookmarkNode.Group -> BookmarkEditDialogUtil.editGroup(project, node)
+                                        is BookmarkNode.Process -> BookmarkEditDialogUtil.editProcess(project, node)
+                                        else -> null
+                                    }
+                                } ?: return@launch
+                                viewModel.processIntent(BookmarkIntent.EditNode(updated))
                             }
                         }
                     })
