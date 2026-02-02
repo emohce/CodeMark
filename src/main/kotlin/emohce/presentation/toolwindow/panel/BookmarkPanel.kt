@@ -2,9 +2,6 @@ package emohce.presentation.toolwindow.panel
 
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
-import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
-import com.intellij.codeInsight.hints.ParameterHintsPassFactory
-import com.intellij.psi.PsiManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -18,7 +15,6 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.WriteIntentReadAction
 import com.intellij.psi.PsiDocumentManager
@@ -1806,65 +1802,8 @@ class BookmarkPanel(
                 selectNodeWithRetry(effect.nodeId, maxRetries = 5, delayMs = 100)
             }
             is BookmarkSideEffect.RefreshInlays -> {
-                logger.info("[REFRESH_INLAYS] Step 1: Starting refresh for filePath=${effect.filePath}")
-                val normalizedPath = FileUtil.toSystemIndependentName(effect.filePath)
-                logger.info("[REFRESH_INLAYS] Step 2: Normalized path=$normalizedPath")
-                
-                val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath)
-                if (file == null) {
-                    logger.warn("[REFRESH_INLAYS] Step 3: File not found, normalizedPath=$normalizedPath (cache already cleared)")
-                    return
-                }
-                logger.info("[REFRESH_INLAYS] Step 3: File found, path=${file.path}")
-                
-                // 使用 WriteIntentReadAction 以满足 commitDocument 的写线程要求
-                logger.info("[REFRESH_INLAYS] Step 5: Executing WriteIntentReadAction to restart daemon...")
-                WriteIntentReadAction.run<Nothing> {
-                    val psiFile = PsiManager.getInstance(project).findFile(file)
-                    logger.info("[REFRESH_INLAYS] Step 6: PSI file found=${psiFile != null}, file path=${file.path}")
-                    
-                    if (psiFile != null) {
-                        val document = PsiDocumentManager.getInstance(project).getDocument(psiFile)
-                        if (document != null) {
-                            logger.info("[REFRESH_INLAYS] Step 6.1: Committing document to ensure PSI is up to date")
-                            PsiDocumentManager.getInstance(project).commitDocument(document)
-                        }
-                    }
-                    
-                    val analyzer = DaemonCodeAnalyzer.getInstance(project)
-                    val editors = FileEditorManager.getInstance(project).getEditors(file)
-                    logger.info("[REFRESH_INLAYS] Step 7: Found ${editors.size} open editor(s) for file")
-                    
-                    editors.forEach { editor ->
-                        (editor as? TextEditor)?.editor?.let { textEditor ->
-                            logger.info("[REFRESH_INLAYS] Step 8: Forcing hints update for editor")
-                            ParameterHintsPassFactory.forceHintsUpdateOnNextPass(textEditor)
-                        }
-                    }
-                    
-                    if (psiFile != null) {
-                        logger.info("[REFRESH_INLAYS] Step 9: Restarting daemon for specific file: ${psiFile.name}")
-                        analyzer.restart(psiFile)
-                    } else {
-                        logger.info("[REFRESH_INLAYS] Step 9: PSI file not found, restarting daemon for all files")
-                        analyzer.restart()
-                    }
-                }
-                
-                // 在 EDT 上延迟执行 daemon 重启，确保 LineMarkerProvider 被重新调用
-                ApplicationManager.getApplication().invokeLater({
-                    logger.info("[REFRESH_INLAYS] Step 10: EDT daemon restart")
-                    val analyzer = DaemonCodeAnalyzer.getInstance(project)
-                    val psiFile = PsiManager.getInstance(project).findFile(file)
-                    if (psiFile != null) {
-                        logger.info("[REFRESH_INLAYS] Step 10.1: Restart daemon for file ${psiFile.name}")
-                        analyzer.restart(psiFile)
-                    }
-                    logger.info("[REFRESH_INLAYS] Step 10.2: Full daemon restart")
-                    analyzer.restart()
-                }, com.intellij.openapi.application.ModalityState.NON_MODAL)
-                
-                logger.info("[REFRESH_INLAYS] Step 11: Daemon restart scheduled.")
+                // Gutter + line-end painter: refresh highlighters and repaint (EditorLinePainter reads index on paint)
+                BookmarkHighlighterService.getInstance(project).refreshGutterForFile(effect.filePath)
             }
             is BookmarkSideEffect.RefreshGutterAll -> {
                 // Gutter 由 BookmarkHighlighterService 单源刷新（RangeHighlighter），不再使用 LineMarkerProvider/daemon

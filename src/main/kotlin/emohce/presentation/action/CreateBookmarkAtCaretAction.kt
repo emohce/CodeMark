@@ -12,7 +12,11 @@ import com.intellij.psi.PsiManager
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
 import emohce.presentation.selection.SelectionBus
+import emohce.presentation.toolwindow.BookmarkEditDialogUtil
+import emohce.presentation.toolwindow.BookmarkIntent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 class CreateBookmarkAtCaretAction : AnAction() {
     private val logger = Logger.getInstance(CreateBookmarkAtCaretAction::class.java)
@@ -23,14 +27,35 @@ class CreateBookmarkAtCaretAction : AnAction() {
         val editor = e.getData(CommonDataKeys.EDITOR) ?: return logger.warn("[ACTION_CREATE_BOOKMARK] No editor")
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return logger.warn("[ACTION_CREATE_BOOKMARK] No file")
 
+        val caret = editor.caretModel.primaryCaret
+        val line = caret.logicalPosition.line
+        val column = caret.logicalPosition.column
+
+        val existingBookmark = runBlocking {
+            withContext(Dispatchers.IO) {
+                val locator = ServiceLocator.get(project)
+                locator.bookmarkRepository.findByFilePath(file.path)
+                    .firstOrNull { it.line == line }
+            }
+        }
+
+        if (existingBookmark != null) {
+            val edited = BookmarkEditDialogUtil.editBookmark(project, existingBookmark) ?: return
+            runBlocking {
+                val locator = ServiceLocator.get(project)
+                locator.bookmarkViewModel.processIntent(BookmarkIntent.EditNode(edited))
+            }
+            NotificationGroupManager.getInstance()
+                .getNotificationGroup("CodeRemarkTour")
+                .createNotification("CodeMark updated", NotificationType.INFORMATION)
+                .notify(project)
+            return
+        }
+
         logger.info("[ACTION_CREATE_BOOKMARK] Showing input dialog for bookmark name...")
         val name = Messages.showInputDialog(project, "CodeMark name:", "Create CodeMark", null) ?: return logger.info("[ACTION_CREATE_BOOKMARK] User cancelled name input")
         if (name.isBlank()) return logger.warn("[ACTION_CREATE_BOOKMARK] Name is blank")
         val description = Messages.showInputDialog(project, "Description (optional):", "Create CodeMark", null) ?: ""
-
-        val caret = editor.caretModel.primaryCaret
-        val line = caret.logicalPosition.line
-        val column = caret.logicalPosition.column
 
         logger.info("[ACTION_CREATE_BOOKMARK] Creating bookmark object: name=$name, filePath=${file.path}, line=$line, column=$column")
         val bookmark = BookmarkNode.Bookmark(
@@ -49,7 +74,7 @@ class CreateBookmarkAtCaretAction : AnAction() {
             )
             logger.info("[ACTION_CREATE_BOOKMARK] ParentId=$parentId, insertIndex=$insertIndex, calling processIntent...")
             locator.bookmarkViewModel.processIntent(
-                emohce.presentation.toolwindow.BookmarkIntent.CreateBookmark(parentId, bookmark, insertIndex)
+                BookmarkIntent.CreateBookmark(parentId, bookmark, insertIndex)
             )
         }
         logger.info("[ACTION_CREATE_BOOKMARK] processIntent completed, SelectNode side effect will handle tree selection")

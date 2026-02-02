@@ -28,25 +28,11 @@
             id="CodeRemarkTour"
             displayType="BALLOON"
             isLogByDefault="true"/>
-        <codeInsight.inlayProvider
-            language="ANY"
-            implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
-        <codeInsight.inlayProvider
-            language="JAVA"
-            implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
-        <codeInsight.inlayProvider
-            language="kotlin"
-            implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
-        <codeInsight.inlayProvider
-            language="Markdown"
-            implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
-        <codeInsight.inlayProvider
-            language="TEXT"
-            implementationClass="emohce.presentation.editor.inlay.BookmarkLineEndInlayProvider"/>
+        <editor.linePainter implementation="emohce.presentation.editor.linepainter.BookmarkLineEndPainter"/>
         <toolWindow
             id="CodeRemarkTour"
             factoryClass="emohce.presentation.toolwindow.CodeRemarkTourToolWindowFactory"
-            icon="/META-INF/pluginIcon.svg"
+            icon="/META-INF/pluginIcon.png"
             anchor="right"
             secondary="false"/>
         <postStartupActivity implementation="emohce.core.startup.BookmarkStartupActivity"/>

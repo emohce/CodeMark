@@ -5,7 +5,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Provides a shared BookmarkStore per Project to keep actions, toolwindow,
- * and inlay providers reading/writing the same state.
+ * and line painter / gutter reading the same state.
  */
 object BookmarkStoreProvider {
     private val stores = ConcurrentHashMap<Project, BookmarkStore>()

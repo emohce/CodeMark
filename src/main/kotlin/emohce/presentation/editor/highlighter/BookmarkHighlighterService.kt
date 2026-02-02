@@ -16,11 +16,11 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
-import com.intellij.icons.AllIcons
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
 import emohce.presentation.index.BookmarkIndexService
 import emohce.presentation.selection.SelectionBus
+import emohce.presentation.toolwindow.panel.render.NodeIcons
 import emohce.presentation.toolwindow.BookmarkEditDialogUtil
 import emohce.presentation.toolwindow.BookmarkIntent
 import emohce.presentation.toolwindow.BookmarkViewModel
@@ -123,6 +123,7 @@ class BookmarkHighlighterService(private val project: Project) {
             val entries = withContext(Dispatchers.IO) { fileIndex.get()[normalized].orEmpty() }
             try {
                 applyHighlighters(editor, entries)
+                editor.contentComponent.repaint()
             } catch (_: Exception) {
                 // Editor may have been closed while pending
             }
@@ -173,6 +174,7 @@ class BookmarkHighlighterService(private val project: Project) {
                 editors.forEach { editor ->
                     if (editor is com.intellij.openapi.fileEditor.TextEditor) {
                         applyHighlighters(editor.editor, entries)
+                        editor.editor.contentComponent.repaint()
                     }
                 }
             }
@@ -271,7 +273,7 @@ class BookmarkHighlighterService(private val project: Project) {
             hl.isGreedyToLeft = true
             hl.isGreedyToRight = true
             hl.gutterIconRenderer = object : GutterIconRenderer() {
-                override fun getIcon() = AllIcons.Nodes.Bookmark
+                override fun getIcon() = GutterIcons.codemark
                 override fun getClickAction() = object : com.intellij.openapi.actionSystem.AnAction("Select Bookmark") {
                     override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
                         logger.info("[GUTTER_HIGHLIGHT] click node=${entry.nodeId} line=$line")
@@ -380,4 +382,9 @@ class BookmarkHighlighterService(private val project: Project) {
     companion object {
         fun getInstance(project: Project): BookmarkHighlighterService = project.service()
     }
+}
+
+/** Gutter icon: 16x16 scaled plugin icon (same as tree node) */
+private object GutterIcons {
+    val codemark = NodeIcons.bookmark
 }

@@ -416,7 +416,7 @@ class BookmarkViewModel(
         bookmarkRepository.delete(nodeId)
         // observeChanges() 会触发 BookmarkHighlighterService.rebuildIndex() → refreshOpenEditors()
         
-        // 手动刷新特定文件的行末 inlays
+        // 手动刷新特定文件的 gutter 与行末 line painter
         filePath?.let { refreshInlaysAndGutter(it) }
         
         // 通知文档监听器（触发 BookmarkHighlighterService 刷新）
