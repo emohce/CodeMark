@@ -141,7 +141,7 @@ class BookmarkStore(private val project: Project) {
     init {
         val state = dataSource.load()
         if (state == null) {
-            root = BookmarkNode.Group(uuid = "root", name = "Bookmarks")
+            root = BookmarkNode.Group(uuid = "root", name = ROOT_NODE_NAME)
             references = mutableListOf()
         } else {
             // 从数据加载时，将相对路径转换为绝对路径
@@ -177,6 +177,10 @@ class BookmarkStore(private val project: Project) {
     }
 
     fun canUndo(): Boolean = dataSource.hasUndo()
+    
+    companion object {
+        const val ROOT_NODE_NAME = "CodeMarks"
+    }
     
     fun reload() {
         // 刷新 VFS 缓存，确保读取最新的文件内容

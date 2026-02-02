@@ -1813,7 +1813,7 @@ class BookmarkPanel(
                 BookmarkHighlighterService.getInstance(project).refreshGutterForFile(effect.filePath)
             }
             is BookmarkSideEffect.RefreshBookmarkxJson -> {
-                // 刷新打开的 bookmarkx.json 文件编辑器
+                // 刷新打开的 codemark.json 文件编辑器
                 val basePath = project.basePath ?: return
                 val bookmarkxPath = BookmarkPersistentDataSource.dataPath(basePath)
                 val normalizedPath = FileUtil.toSystemIndependentName(bookmarkxPath.toString())

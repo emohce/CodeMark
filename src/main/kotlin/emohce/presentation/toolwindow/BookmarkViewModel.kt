@@ -646,6 +646,6 @@ sealed class BookmarkSideEffect {
     data object RefreshGutterAll : BookmarkSideEffect()
     /** 按文件立即刷新 gutter（新增书签后即时展示） */
     data class RefreshGutterForFile(val filePath: String) : BookmarkSideEffect()
-    /** 刷新打开的 bookmarkx.json 编辑器 */
+    /** 刷新打开的 codemark.json 编辑器 */
     data object RefreshBookmarkxJson : BookmarkSideEffect()
 }
