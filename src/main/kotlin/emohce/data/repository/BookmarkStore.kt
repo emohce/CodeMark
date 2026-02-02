@@ -9,7 +9,6 @@ import emohce.data.persistence.BookmarkPersistentState
 import emohce.data.persistence.NodeData
 import emohce.domain.model.BookmarkNode
 import emohce.domain.model.Reference
-import java.nio.file.Paths
 import java.io.File
 
 class BookmarkStore(private val project: Project) {
@@ -182,7 +181,7 @@ class BookmarkStore(private val project: Project) {
     fun reload() {
         // 刷新 VFS 缓存，确保读取最新的文件内容
         val basePath = project.basePath ?: return
-        val bookmarkxPath = Paths.get(basePath, ".bookmarkx", "bookmarkx.json")
+        val bookmarkxPath = BookmarkPersistentDataSource.dataPath(basePath)
         val normalizedPath = FileUtil.toSystemIndependentName(bookmarkxPath.toString())
         val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath)
         file?.refresh(false, false)

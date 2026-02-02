@@ -32,7 +32,7 @@ import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.diagnostic.Logger
 import emohce.presentation.index.BookmarkIndexService
-import java.nio.file.Paths
+import emohce.data.datasource.BookmarkPersistentDataSource
 
 class BookmarkViewModel(
     private val project: Project,
@@ -243,7 +243,7 @@ class BookmarkViewModel(
 
     private fun observeFileChanges() {
         val basePath = project.basePath ?: return
-        val bookmarkxPath = Paths.get(basePath, ".bookmarkx", "bookmarkx.json")
+        val bookmarkxPath = BookmarkPersistentDataSource.dataPath(basePath)
         val normalizedPath = FileUtil.toSystemIndependentName(bookmarkxPath.toString())
         
         val messageBus = project.messageBus.connect(scope)
@@ -255,7 +255,7 @@ class BookmarkViewModel(
                     val file = event.file ?: continue
                     val filePath = FileUtil.toSystemIndependentName(file.path)
                     
-                    // 检查是否是 bookmarkx.json 文件变化
+                    // 检查是否是 codemark.json 文件变化
                     if (filePath == normalizedPath) {
                         shouldReload = true
                         break
@@ -378,7 +378,7 @@ class BookmarkViewModel(
         // 编辑后立即刷新树形结构和 JSON
         reloadBookmarks()
         
-        // 编辑后刷新打开的 bookmarkx.json 编辑器
+        // 编辑后刷新打开的 codemark.json 编辑器
         _sideEffects.emit(BookmarkSideEffect.RefreshBookmarkxJson)
         
         // 编辑后导航到书签位置（确保编辑器显示最新位置）

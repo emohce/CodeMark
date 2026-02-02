@@ -76,6 +76,7 @@ import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
+import emohce.data.datasource.BookmarkPersistentDataSource
 
 class BookmarkPanel(
     private val project: Project,
@@ -1814,7 +1815,7 @@ class BookmarkPanel(
             is BookmarkSideEffect.RefreshBookmarkxJson -> {
                 // 刷新打开的 bookmarkx.json 文件编辑器
                 val basePath = project.basePath ?: return
-                val bookmarkxPath = java.nio.file.Paths.get(basePath, ".bookmarkx", "bookmarkx.json")
+                val bookmarkxPath = BookmarkPersistentDataSource.dataPath(basePath)
                 val normalizedPath = FileUtil.toSystemIndependentName(bookmarkxPath.toString())
                 val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath) ?: return
                 

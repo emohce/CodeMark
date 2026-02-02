@@ -19,12 +19,12 @@ class BookmarkPersistentDataSource(private val project: Project) {
 
     private fun resolvePath(): Path {
         val basePath = project.basePath ?: System.getProperty("user.dir")
-        return Path.of(basePath, ".bookmarkx", "bookmarkx.json")
+        return dataPath(basePath)
     }
 
     private fun resolveUndoPath(): Path {
         val basePath = project.basePath ?: System.getProperty("user.dir")
-        return Path.of(basePath, ".bookmarkx", "bookmarkx.json.undo")
+        return undoPath(basePath)
     }
 
     fun load(): BookmarkPersistentState? {
@@ -108,5 +108,14 @@ class BookmarkPersistentDataSource(private val project: Project) {
     private fun backupCorruptFile(path: Path) {
         // 不再创建损坏文件的备份
         // 文件损坏时直接返回 null，由系统重新初始化
+    }
+
+    companion object {
+        const val DATA_DIRECTORY = ".codemark"
+        const val DATA_FILE_NAME = "codemark.json"
+        const val UNDO_FILE_NAME = "codemark.json.undo"
+
+        fun dataPath(basePath: String): Path = Path.of(basePath, DATA_DIRECTORY, DATA_FILE_NAME)
+        fun undoPath(basePath: String): Path = Path.of(basePath, DATA_DIRECTORY, UNDO_FILE_NAME)
     }
 }
