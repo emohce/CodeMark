@@ -1,5 +1,6 @@
 package emohce.presentation.editor
 
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.RangeMarker
@@ -43,6 +44,17 @@ class BookmarkDocumentListener(private val project: Project) {
     init {
         setupFileEditorListener()
         loadBookmarksForAllOpenFiles()
+    }
+
+    private fun getDocumentSafely(file: VirtualFile): Document? {
+        return try {
+            ReadAction.compute<Document?, Throwable> {
+                FileDocumentManager.getInstance().getDocument(file)
+            }
+        } catch (e: Throwable) {
+            logger.debug("Error getting document for file ${file.path}: ${e.message}")
+            null
+        }
     }
 
     private fun collectBookmarksForFile(root: BookmarkNode, targetPath: String): List<BookmarkNode.Bookmark> {
@@ -156,7 +168,7 @@ class BookmarkDocumentListener(private val project: Project) {
     }
 
     private fun detachListenerFromFile(file: VirtualFile) {
-        val document = FileDocumentManager.getInstance().getDocument(file) ?: return
+        val document = getDocumentSafely(file) ?: return
         val listener = documentListeners.remove(document)
         listener?.let {
             document.removeDocumentListener(it)
@@ -182,7 +194,7 @@ class BookmarkDocumentListener(private val project: Project) {
             // 如果文件已打开，确保有监听器
             if (FileEditorManager.getInstance(project).isFileOpen(file)) {
                 withContext(Dispatchers.Main) {
-                    val document = FileDocumentManager.getInstance().getDocument(file)
+                    val document = getDocumentSafely(file)
                     if (document != null) {
                         ensureMarkers(document, normalizedPath, bookmarks)
                     }
