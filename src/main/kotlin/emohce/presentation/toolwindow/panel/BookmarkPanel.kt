@@ -3,53 +3,37 @@ package emohce.presentation.toolwindow.panel
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.application.WriteIntentReadAction
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.editor.ScrollType
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.TextEditor
-import com.intellij.openapi.editor.ScrollType
 import com.intellij.openapi.keymap.KeymapManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
-import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.util.io.FileUtil
-import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.application.ReadAction
-import com.intellij.openapi.application.WriteIntentReadAction
-import com.intellij.psi.PsiDocumentManager
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.FormBuilder
+import emohce.data.datasource.BookmarkPersistentDataSource
 import emohce.domain.model.BookmarkNode
-import emohce.presentation.selection.SelectionBus
+import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 import emohce.presentation.index.BookmarkIndexService
+import emohce.presentation.selection.SelectionBus
 import emohce.presentation.toolwindow.BookmarkIntent
 import emohce.presentation.toolwindow.BookmarkSideEffect
 import emohce.presentation.toolwindow.BookmarkViewModel
 import emohce.presentation.toolwindow.BookmarkViewState
-import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 import emohce.presentation.toolwindow.panel.render.BookmarkTreeCellRenderer
 import emohce.presentation.toolwindow.panel.util.BookmarkTreeUtil
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.awt.BorderLayout
-import java.awt.FlowLayout
-import java.awt.BasicStroke
-import java.awt.Color
-import java.awt.Dimension
-import java.awt.Graphics2D
-import java.awt.RenderingHints
-import java.awt.geom.AffineTransform
-import java.awt.geom.Line2D
-import java.awt.geom.Path2D
+import java.awt.*
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
 import java.awt.datatransfer.Transferable
@@ -57,26 +41,16 @@ import java.awt.event.ActionEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
-import javax.swing.AbstractAction
-import javax.swing.DropMode
-import javax.swing.InputMap
-import javax.swing.JButton
-import javax.swing.JComponent
-import javax.swing.JLabel
-import javax.swing.JPanel
-import javax.swing.JPopupMenu
-import javax.swing.JScrollPane
-import javax.swing.ListSelectionModel
-import javax.swing.JTextArea
-import javax.swing.JTextField
-import javax.swing.KeyStroke
-import javax.swing.JToggleButton
-import javax.swing.TransferHandler
+import java.awt.geom.AffineTransform
+import java.awt.geom.Line2D
+import java.awt.geom.Path2D
+import javax.swing.*
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
-import emohce.data.datasource.BookmarkPersistentDataSource
 
 class BookmarkPanel(
     private val project: Project,
@@ -116,7 +90,8 @@ class BookmarkPanel(
         searchField = JTextField(24)
         tree = Tree(treeModel)
         tree.isRootVisible = true
-        tree.cellRenderer = BookmarkTreeCellRenderer()
+        val renderer = BookmarkTreeCellRenderer()
+        tree.cellRenderer = renderer
         tree.selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
         tree.addTreeSelectionListener {
             logger.info("=== TreeSelectionListener triggered ===")
@@ -174,17 +149,38 @@ class BookmarkPanel(
             }
             SelectionBus.getInstance(project).setCurrentContainerId(currentContainerId())
             SelectionBus.getInstance(project).setLastSelectedNodeId(node?.uuid)
+            renderer.highlightNodeId = node?.uuid
+            tree.repaint()
         }
         tree.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "collapse")
         tree.actionMap.put("collapse", object : AbstractAction() {
             override fun actionPerformed(e: ActionEvent) {
-                tree.collapsePath(tree.selectionPath)
+                val path = tree.selectionPath ?: return
+                if (tree.isExpanded(path)) {
+                    tree.collapsePath(path)
+                } else {
+                    // move selection to parent when already collapsed
+                    path.parentPath?.let { tree.selectionPath = it }
+                }
             }
         })
         tree.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, 0), "expand")
         tree.actionMap.put("expand", object : AbstractAction() {
             override fun actionPerformed(e: ActionEvent) {
-                tree.expandPath(tree.selectionPath)
+                    val path = tree.selectionPath ?: run {
+                        if (tree.rowCount > 0) tree.setSelectionRow(0)
+                        return
+                    }
+                    if (!tree.isExpanded(path)) {
+                        tree.expandPath(path)
+                    } else {
+                        // if already expanded, move to first child
+                        val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return
+                        if (node.childCount > 0) {
+                            val child = node.getChildAt(0) as? DefaultMutableTreeNode ?: return
+                            tree.selectionPath = TreePath(child.path)
+                        }
+                    }
             }
         })
         tree.addTreeExpansionListener(object : javax.swing.event.TreeExpansionListener {
@@ -307,6 +303,8 @@ class BookmarkPanel(
         installShortcuts()
         checkShortcutConflicts()
 
+        installSearchFieldListeners()
+
         viewModel.state.onEach { state ->
             updateTree(state)
         }.launchIn(scope)
@@ -325,6 +323,8 @@ class BookmarkPanel(
                 // Gutter click: expand by domain path so inner nodes under collapsed groups are selected
                 if (expandToNodeByDomainPath(req.nodeId)) {
                     SelectionBus.getInstance(project).setLastSelectedNodeId(req.nodeId)
+                    renderer.highlightNodeId = req.nodeId
+                    tree.repaint()
                     return@onEach
                 }
                 val byIndex = req.filePath?.let { path -> indexService.firstMatch(path, req.line)?.nodeId }
@@ -334,11 +334,44 @@ class BookmarkPanel(
                     selectNodeWithRetry(resolvedId)
                 } else if (req.filePath != null) {
                     if (selectNodeByPathAndLine(req.filePath, req.line)) {
-                        selectedNode()?.uuid?.let { SelectionBus.getInstance(project).setLastSelectedNodeId(it) }
+                        selectedNode()?.uuid?.let {
+                            SelectionBus.getInstance(project).setLastSelectedNodeId(it)
+                            renderer.highlightNodeId = it
+                            tree.repaint()
+                        }
                     }
                 }
             }
         }.launchIn(scope)
+
+        SwingUtilities.invokeLater { searchField.requestFocusInWindow() }
+    }
+
+    private fun installSearchFieldListeners() {
+        searchField.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(e: DocumentEvent) = liveSearch()
+            override fun removeUpdate(e: DocumentEvent) = liveSearch()
+            override fun changedUpdate(e: DocumentEvent) = liveSearch()
+        })
+
+        tree.addKeyListener(object : java.awt.event.KeyAdapter() {
+            override fun keyTyped(e: java.awt.event.KeyEvent) {
+                if (!e.isControlDown && !e.isAltDown && !e.isMetaDown && !e.isActionKey) {
+                    if (!searchField.hasFocus()) {
+                        searchField.requestFocusInWindow()
+                    }
+                }
+            }
+        })
+    }
+
+    private fun liveSearch() {
+        val query = searchField.text
+        if (query.isBlank()) {
+            viewModel.processIntent(BookmarkIntent.ClearSearch)
+        } else {
+            viewModel.processIntent(BookmarkIntent.Search(query, activeFilters()))
+        }
     }
 
     private fun updateTree(state: BookmarkViewState) {

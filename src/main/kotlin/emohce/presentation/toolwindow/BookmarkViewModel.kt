@@ -1,8 +1,14 @@
 package emohce.presentation.toolwindow
 
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.vfs.VirtualFileManager
+import com.intellij.openapi.vfs.newvfs.BulkFileListener
+import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import emohce.core.coroutine.CoroutineDispatchers
+import emohce.data.datasource.BookmarkPersistentDataSource
 import emohce.domain.event.BookmarkEvent
 import emohce.domain.model.BookmarkNode
 import emohce.domain.model.ProcessProgress
@@ -11,28 +17,10 @@ import emohce.domain.repository.ReferenceRepository
 import emohce.domain.usecase.navigation.ProcessNavigationUseCase
 import emohce.domain.usecase.reference.DetectCircularRefUseCase
 import emohce.domain.usecase.reference.SyncReferencesUseCase
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import com.intellij.openapi.vfs.VirtualFileManager
-import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.openapi.vfs.newvfs.BulkFileListener
-import com.intellij.openapi.vfs.newvfs.events.VFileEvent
-import com.intellij.openapi.util.io.FileUtil
-import com.intellij.openapi.vfs.LocalFileSystem
-import com.intellij.openapi.diagnostic.Logger
 import emohce.presentation.index.BookmarkIndexService
-import emohce.data.datasource.BookmarkPersistentDataSource
+import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.*
 
 class BookmarkViewModel(
     private val project: Project,
@@ -395,6 +383,13 @@ class BookmarkViewModel(
     /** Document-driven line sync only; no NavigateToFile / SelectNode / RefreshBookmarkxJson. */
     private suspend fun handleUpdateBookmarkLineFromDocument(nodeId: String, newLine: Int) {
         bookmarkRepository.updateLineOnly(nodeId, newLine)
+        val node = bookmarkRepository.findByUuid(nodeId)
+        val path = when (node) {
+            is BookmarkNode.Bookmark -> node.filePath
+            is BookmarkNode.Process -> node.entryFilePath
+            else -> null
+        }
+        path?.let { _sideEffects.emit(BookmarkSideEffect.RefreshInlays(it)) }
     }
 
     private suspend fun handleMoveNode(nodeId: String, newParentId: String?, newIndex: Int) {

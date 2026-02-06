@@ -12,10 +12,9 @@ import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.psi.PsiDocumentManager
-import com.intellij.ui.EditorNotifications
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
+import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 import emohce.presentation.toolwindow.BookmarkIntent
 import emohce.presentation.toolwindow.BookmarkViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -23,7 +22,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -31,8 +29,7 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.swing.SwingUtilities
 
 /**
- * 监听所有打开的文件中有书签的文件，自动更新书签行号
- */
+ * 监听所有打开的文件中有书签的文件，自动更新书签行�? */
 class BookmarkDocumentListener(private val project: Project) {
     private val logger = Logger.getInstance(BookmarkDocumentListener::class.java)
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -93,16 +90,27 @@ class BookmarkDocumentListener(private val project: Project) {
                 if (line >= 0 && line < document.lineCount) {
                     val start = document.getLineStartOffset(line)
                     val marker = document.createRangeMarker(start, start)
-                    marker.isGreedyToLeft = true
-                    marker.isGreedyToRight = true
+                    // Keep the marker anchored to original content when lines are inserted/deleted at the boundary.
+                    marker.isGreedyToLeft = false
+                    marker.isGreedyToRight = false
                     state.markers[bookmark.uuid] = MarkerInfo(bookmark, marker, line)
                 } else {
                     logger.debug("Skip marker creation out of bounds path=$normalizedPath line=$line")
                 }
             } else {
-                // 更新最新书签对象和行号基线
+                // Sync marker position when the stored line changes (e.g. external updates).
                 existing.bookmark = bookmark
-                existing.lastSyncedLine = existing.lastSyncedLine.coerceAtLeast(0)
+                val currentLine = document.getLineNumber(existing.marker.startOffset)
+                if (currentLine != bookmark.line && bookmark.line >= 0 && bookmark.line < document.lineCount) {
+                    existing.marker.dispose()
+                    val start = document.getLineStartOffset(bookmark.line)
+                    val marker = document.createRangeMarker(start, start)
+                    marker.isGreedyToLeft = false
+                    marker.isGreedyToRight = false
+                    state.markers[bookmark.uuid] = MarkerInfo(bookmark, marker, bookmark.line)
+                } else {
+                    existing.lastSyncedLine = existing.lastSyncedLine.coerceAtLeast(0)
+                }
             }
         }
     }
@@ -248,10 +256,9 @@ class BookmarkDocumentListener(private val project: Project) {
                     }
                 }
 
-                // 防抖写回行号
-                flushJob?.cancel()
+                // 防抖写回行号（缩短延迟以减少错位时间窗口)                flushJob?.cancel()
                 flushJob = scope.launch {
-                    delay(180)
+                    delay(30)
                     flushMarkers(document, state)
                 }
             } finally {
@@ -292,6 +299,10 @@ class BookmarkDocumentListener(private val project: Project) {
                     info.lastSyncedLine = line
                 }
             }
+        }
+        // flush 完成后立即触发该文件 Gutter 刷新
+        scope.launch {
+            BookmarkHighlighterService.getInstance(project).refreshGutterForFile(state.filePath)
         }
     }
 

@@ -11,28 +11,21 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.TextEditor
-import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
+import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowManager
 import emohce.core.di.ServiceLocator
+import emohce.domain.event.BookmarkEvent
 import emohce.domain.model.BookmarkNode
 import emohce.presentation.index.BookmarkIndexService
 import emohce.presentation.selection.SelectionBus
-import emohce.presentation.toolwindow.panel.render.NodeIcons
 import emohce.presentation.toolwindow.BookmarkEditDialogUtil
 import emohce.presentation.toolwindow.BookmarkIntent
-import emohce.presentation.toolwindow.BookmarkViewModel
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import emohce.presentation.toolwindow.panel.render.NodeIcons
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.awt.event.ActionEvent
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicReference
@@ -96,7 +89,17 @@ class BookmarkHighlighterService(private val project: Project) {
         scope.launch {
             locator.bookmarkRepository.observeChanges().collect { event ->
                 logger.info("[GUTTER_HIGHLIGHT] repo event=${event.javaClass.simpleName}")
-                requestRebuild()
+                when (event) {
+                    is BookmarkEvent.NodeLineSynced -> {
+                        val path = when (val node = event.node) {
+                            is BookmarkNode.Bookmark -> node.filePath
+                            is BookmarkNode.Process -> node.entryFilePath
+                            else -> null
+                        }
+                        path?.let { refreshGutterForFile(it) }
+                    }
+                    else -> requestRebuild()
+                }
             }
         }
     }
