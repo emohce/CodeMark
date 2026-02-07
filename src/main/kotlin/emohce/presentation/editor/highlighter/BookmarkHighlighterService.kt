@@ -12,6 +12,7 @@ import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
@@ -20,6 +21,7 @@ import emohce.core.di.ServiceLocator
 import emohce.domain.event.BookmarkEvent
 import emohce.domain.model.BookmarkNode
 import emohce.presentation.index.BookmarkIndexService
+import emohce.presentation.action.CodemarkNavigationHelper
 import emohce.presentation.selection.SelectionBus
 import emohce.presentation.toolwindow.BookmarkEditDialogUtil
 import emohce.presentation.toolwindow.BookmarkIntent
@@ -280,13 +282,44 @@ class BookmarkHighlighterService(private val project: Project) {
                 override fun getClickAction() = object : com.intellij.openapi.actionSystem.AnAction("Select Bookmark") {
                     override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
                         logger.info("[GUTTER_HIGHLIGHT] click node=${entry.nodeId} line=$line")
-                        selectionBus.requestSelect(entry.nodeId)
                         toolWindowManager.getToolWindow("CodeRemarkTour")?.show(null)
-                        flashLine(editor, line)
+                        CodemarkNavigationHelper.navigateToEntry(project, entry.filePath, line, 0)
+                        com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
+                            selectionBus.requestSelect(entry.nodeId, entry.filePath, line)
+                            flashLine(editor, line)
+                        }
                     }
                 }
                 override fun getPopupMenuActions(): com.intellij.openapi.actionSystem.ActionGroup? {
                     val group = com.intellij.openapi.actionSystem.DefaultActionGroup()
+                    group.add(object : com.intellij.openapi.actionSystem.AnAction("Next CodeMark") {
+                        override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
+                            scope.launch {
+                                selectionBus.setLastSelectedNodeId(entry.nodeId)
+                                val nextEntry = withContext(Dispatchers.IO) {
+                                    locator.globalCodemarkNavigationUseCase.findNext(entry.nodeId)
+                                } ?: return@launch
+                                selectionBus.setLastSelectedNodeId(nextEntry.nodeId)
+                                CodemarkNavigationHelper.navigateToEntry(project, nextEntry.filePath, nextEntry.line, nextEntry.column)
+                                viewModel.processIntent(BookmarkIntent.NavigateToNode(nextEntry.nodeId))
+                                toolWindowManager.getToolWindow("CodeRemarkTour")?.show(null)
+                            }
+                        }
+                    })
+                    group.add(object : com.intellij.openapi.actionSystem.AnAction("Prev CodeMark") {
+                        override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
+                            scope.launch {
+                                selectionBus.setLastSelectedNodeId(entry.nodeId)
+                                val prevEntry = withContext(Dispatchers.IO) {
+                                    locator.globalCodemarkNavigationUseCase.findPrevious(entry.nodeId)
+                                } ?: return@launch
+                                selectionBus.setLastSelectedNodeId(prevEntry.nodeId)
+                                CodemarkNavigationHelper.navigateToEntry(project, prevEntry.filePath, prevEntry.line, prevEntry.column)
+                                viewModel.processIntent(BookmarkIntent.NavigateToNode(prevEntry.nodeId))
+                                toolWindowManager.getToolWindow("CodeRemarkTour")?.show(null)
+                            }
+                        }
+                    })
                     group.add(object : com.intellij.openapi.actionSystem.AnAction("Edit") {
                         override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
                             scope.launch {
@@ -318,8 +351,16 @@ class BookmarkHighlighterService(private val project: Project) {
                     })
                     group.add(object : com.intellij.openapi.actionSystem.AnAction("Delete") {
                         override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
-                            scope.launch { 
-                                viewModel.processIntent(BookmarkIntent.DeleteNode(entry.nodeId))
+                            val result = Messages.showYesNoDialog(
+                                project,
+                                "Delete this CodeMark?",
+                                "Delete",
+                                Messages.getQuestionIcon()
+                            )
+                            if (result == Messages.YES) {
+                                scope.launch {
+                                    viewModel.processIntent(BookmarkIntent.DeleteNode(entry.nodeId))
+                                }
                             }
                         }
                     })

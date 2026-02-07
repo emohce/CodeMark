@@ -66,5 +66,26 @@
             <keyboard-shortcut keymap="$default" first-keystroke="shift F4"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action id="CodeRemarkTour.NextCodemark"
+                class="emohce.presentation.action.NextCodemarkAction"
+                text="Next CodeMark"
+                description="Go to next CodeMark in tree order">
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift DOWN"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action id="CodeRemarkTour.PrevCodemark"
+                class="emohce.presentation.action.PrevCodemarkAction"
+                text="Prev CodeMark"
+                description="Go to previous CodeMark in tree order">
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift UP"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action id="CodeRemarkTour.DeleteCodeMarkAtCaret"
+                class="emohce.presentation.action.DeleteCodeMarkAtCaretAction"
+                text="Delete CodeMark"
+                description="Delete CodeMark at current line">
+            <keyboard-shortcut keymap="$default" first-keystroke="shift DELETE"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

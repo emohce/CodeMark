@@ -11,6 +11,7 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.psi.PsiManager
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
+import emohce.presentation.index.BookmarkIndexService
 import emohce.presentation.selection.SelectionBus
 import emohce.presentation.toolwindow.BookmarkEditDialogUtil
 import emohce.presentation.toolwindow.BookmarkIntent
@@ -31,16 +32,24 @@ class CreateBookmarkAtCaretAction : AnAction() {
         val line = caret.logicalPosition.line
         val column = caret.logicalPosition.column
 
-        val existingBookmark = runBlocking {
-            withContext(Dispatchers.IO) {
-                val locator = ServiceLocator.get(project)
-                locator.bookmarkRepository.findByFilePath(file.path)
-                    .firstOrNull { it.line == line }
+        val indexService = BookmarkIndexService.getInstance(project)
+        val existingEntry = indexService.entriesForFile(file.path).firstOrNull { it.line == line }
+        val existingNode = if (existingEntry != null) {
+            runBlocking {
+                withContext(Dispatchers.IO) {
+                    ServiceLocator.get(project).bookmarkRepository.findByUuid(existingEntry.nodeId)
+                }
             }
-        }
+        } else null
 
-        if (existingBookmark != null) {
-            val edited = BookmarkEditDialogUtil.editBookmark(project, existingBookmark) ?: return
+        if (existingNode != null) {
+            val edited = when (existingNode) {
+                is BookmarkNode.Bookmark -> BookmarkEditDialogUtil.editBookmark(project, existingNode)
+                is BookmarkNode.DescriptiveBookmark -> BookmarkEditDialogUtil.editDescriptive(project, existingNode)
+                is BookmarkNode.Group -> BookmarkEditDialogUtil.editGroup(project, existingNode)
+                is BookmarkNode.Process -> BookmarkEditDialogUtil.editProcess(project, existingNode)
+                else -> null
+            } ?: return
             runBlocking {
                 val locator = ServiceLocator.get(project)
                 locator.bookmarkViewModel.processIntent(BookmarkIntent.EditNode(edited))
@@ -85,8 +94,17 @@ class CreateBookmarkAtCaretAction : AnAction() {
     }
 
     override fun update(e: AnActionEvent) {
-        val hasEditor = e.getData(CommonDataKeys.EDITOR) != null
-        val hasFile = e.getData(CommonDataKeys.VIRTUAL_FILE) != null
-        e.presentation.isEnabledAndVisible = hasEditor && hasFile
+        val project = e.project
+        val editor = e.getData(CommonDataKeys.EDITOR)
+        val file = e.getData(CommonDataKeys.VIRTUAL_FILE)
+        val hasEditor = editor != null
+        val hasFile = file != null
+        e.presentation.isEnabledAndVisible = hasEditor && hasFile && project != null
+        if (hasEditor && hasFile && project != null) {
+            val indexService = BookmarkIndexService.getInstance(project)
+            val caretLine = editor!!.caretModel.primaryCaret.logicalPosition.line
+            val hasCodemark = indexService.entriesForFile(file!!.path).any { it.line == caretLine }
+            e.presentation.text = if (hasCodemark) "Edit CodeMark" else "Add CodeMark Here"
+        }
     }
 }

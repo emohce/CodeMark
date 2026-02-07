@@ -38,6 +38,7 @@ class ProcessNavigationUseCaseTest {
         override suspend fun search(query: String, limit: Int): List<BookmarkNode> = emptyList()
         override suspend fun create(node: BookmarkNode, parentId: String?, index: Int?) = Unit
         override suspend fun update(node: BookmarkNode) = Unit
+        override suspend fun updateLineOnly(nodeId: String, newLine: Int) = Unit
         override suspend fun delete(nodeId: String) = Unit
         override suspend fun move(nodeId: String, newParentId: String?, newIndex: Int) = Unit
         override suspend fun reorder(parentId: String, orderedChildIds: List<String>) = Unit

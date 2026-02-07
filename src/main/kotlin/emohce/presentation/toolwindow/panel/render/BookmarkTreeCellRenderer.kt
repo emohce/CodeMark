@@ -1,4 +1,4 @@
-﻿package emohce.presentation.toolwindow.panel.render
+package emohce.presentation.toolwindow.panel.render
 
 import com.intellij.ui.ColoredTreeCellRenderer
 import com.intellij.ui.SimpleTextAttributes
@@ -8,6 +8,7 @@ import javax.swing.JTree
 
 class BookmarkTreeCellRenderer : ColoredTreeCellRenderer() {
     var highlightNodeId: String? = null
+    var searchQuery: String = ""
 
     override fun customizeCellRenderer(
         tree: JTree,
@@ -26,7 +27,23 @@ class BookmarkTreeCellRenderer : ColoredTreeCellRenderer() {
                 SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, Color(0, 153, 0))
             } else null
             val nameAttrs = highlightAttrs ?: baseAttrs
-            append(nodeView.displayName, nameAttrs)
+            val matchAttrs = SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES
+            if (searchQuery.isNotBlank()) {
+                val name = nodeView.displayName
+                var i = 0
+                while (i < name.length) {
+                    val idx = name.indexOf(searchQuery, i, ignoreCase = true)
+                    if (idx < 0) {
+                        append(name.substring(i), nameAttrs)
+                        break
+                    }
+                    append(name.substring(i, idx), nameAttrs)
+                    append(name.substring(idx, idx + searchQuery.length), matchAttrs)
+                    i = idx + searchQuery.length
+                }
+            } else {
+                append(nodeView.displayName, nameAttrs)
+            }
             val suffix = nodeView.suffix
             if (suffix.isNotBlank()) {
                 append(" $suffix", SimpleTextAttributes.GRAY_ATTRIBUTES)

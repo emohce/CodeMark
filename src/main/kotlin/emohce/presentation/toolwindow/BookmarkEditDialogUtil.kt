@@ -28,7 +28,7 @@ object BookmarkEditDialogUtil {
             .addLabeledComponent("Column", columnField)
             .panel
 
-        if (!showPanelOkCancel(project, panel, "Edit Bookmark")) return null
+        if (!showPanelOkCancel(project, panel, "Edit Bookmark", nameField)) return null
         val path = pathField.text.trim()
         if (!ensureFileExists(path, "Edit Bookmark")) return null
         val line = (lineField.text.trim().toIntOrNull() ?: node.line).coerceAtLeast(0)
@@ -52,7 +52,7 @@ object BookmarkEditDialogUtil {
             .addLabeledComponent("Markdown", JScrollPane(markdownField))
             .panel
 
-        if (!showPanelOkCancel(project, panel, "Edit Description")) return null
+        if (!showPanelOkCancel(project, panel, "Edit Description", nameField)) return null
         return node.copy(
             name = nameField.text.trim(),
             description = descField.text.trim(),
@@ -68,7 +68,7 @@ object BookmarkEditDialogUtil {
             .addLabeledComponent("Description", descField)
             .panel
 
-        if (!showPanelOkCancel(project, panel, "Edit Group")) return null
+        if (!showPanelOkCancel(project, panel, "Edit Group", nameField)) return null
         return node.copy(name = nameField.text.trim(), description = descField.text.trim())
     }
 
@@ -84,7 +84,7 @@ object BookmarkEditDialogUtil {
             .addLabeledComponent("Entry line", entryLineField)
             .panel
 
-        if (!showPanelOkCancel(project, panel, "Edit Process")) return null
+        if (!showPanelOkCancel(project, panel, "Edit Process", nameField)) return null
         val entryPath = entryPathField.text.trim().ifBlank { null }
         if (!entryPath.isNullOrBlank() && !ensureFileExists(entryPath, "Edit Process")) return null
         val entryLine = entryLineField.text.trim().toIntOrNull()
@@ -96,7 +96,7 @@ object BookmarkEditDialogUtil {
         )
     }
 
-    private fun showPanelOkCancel(project: Project, panel: JPanel, title: String): Boolean {
+    private fun showPanelOkCancel(project: Project, panel: JPanel, title: String, preferredFocus: JComponent? = null): Boolean {
         val dialog = object : DialogWrapper(project) {
             init {
                 this.title = title
@@ -104,6 +104,8 @@ object BookmarkEditDialogUtil {
             }
 
             override fun createCenterPanel(): JComponent = panel
+
+            override fun getPreferredFocusedComponent(): JComponent? = preferredFocus
         }
         return dialog.showAndGet()
     }

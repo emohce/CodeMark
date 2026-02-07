@@ -19,8 +19,10 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.FormBuilder
+import emohce.core.di.ServiceLocator
 import emohce.data.datasource.BookmarkPersistentDataSource
 import emohce.domain.model.BookmarkNode
+import emohce.presentation.action.CodemarkNavigationHelper
 import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 import emohce.presentation.index.BookmarkIndexService
 import emohce.presentation.selection.SelectionBus
@@ -33,6 +35,7 @@ import emohce.presentation.toolwindow.panel.util.BookmarkTreeUtil
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.runBlocking
 import java.awt.*
 import java.awt.datatransfer.DataFlavor
 import java.awt.datatransfer.StringSelection
@@ -61,6 +64,7 @@ class BookmarkPanel(
     private lateinit var tree: Tree
     private lateinit var searchField: JTextField
     private lateinit var scope: CoroutineScope
+    private val renderer = BookmarkTreeCellRenderer()
     private val indexService = BookmarkIndexService.getInstance(project)
     private var currentRoot: BookmarkNode.Group? = null
     private var currentReferenceCounts: Map<String, Int> = emptyMap()
@@ -72,6 +76,12 @@ class BookmarkPanel(
     private var lastSelectedBeforeSearch: String? = null
     private var pendingSelectionAfterClear: String? = null
     private var isSelectingFromSideEffect: Boolean = false
+    private var expandCurrentBtn: JButton? = null
+    private var searchDebounceTimer: javax.swing.Timer? = null
+    private var savedExpandedOnSearchStart: Set<String>? = null
+    private var suppressExpandCollapseIntents: Boolean = false
+    private var isSelectionFromSearchNav: Boolean = false
+    private var searchMatchRows: List<Int> = emptyList()
 
     private fun showPanelOkCancel(panel: JComponent, title: String): Boolean {
         val dialog = object : DialogWrapper(project) {
@@ -90,7 +100,6 @@ class BookmarkPanel(
         searchField = JTextField(24)
         tree = Tree(treeModel)
         tree.isRootVisible = true
-        val renderer = BookmarkTreeCellRenderer()
         tree.cellRenderer = renderer
         tree.selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
         tree.addTreeSelectionListener {
@@ -115,6 +124,15 @@ class BookmarkPanel(
                 }
                 SelectionBus.getInstance(project).setCurrentContainerId(currentContainerId())
                 SelectionBus.getInstance(project).setLastSelectedNodeId(node?.uuid)
+                renderer.highlightNodeId = node?.uuid
+                tree.repaint()
+                return@addTreeSelectionListener
+            }
+            if (isSelectionFromSearchNav) {
+                isSelectionFromSearchNav = false
+                val node = selectedNode()
+                renderer.highlightNodeId = node?.uuid
+                tree.repaint()
                 return@addTreeSelectionListener
             }
             
@@ -151,6 +169,7 @@ class BookmarkPanel(
             SelectionBus.getInstance(project).setLastSelectedNodeId(node?.uuid)
             renderer.highlightNodeId = node?.uuid
             tree.repaint()
+            updateExpandCurrentButtonState()
         }
         tree.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, 0), "collapse")
         tree.actionMap.put("collapse", object : AbstractAction() {
@@ -187,14 +206,19 @@ class BookmarkPanel(
             override fun treeExpanded(event: javax.swing.event.TreeExpansionEvent) {
                 val node = (event.path.lastPathComponent as? DefaultMutableTreeNode)?.userObject as? NodeView
                 if (node != null) {
-                    populateChildren(event.path.lastPathComponent as DefaultMutableTreeNode, node.node)
-                    viewModel.processIntent(BookmarkIntent.ExpandNode(node.node.uuid))
+                    // Search mode uses a filtered tree that is fully materialized; do not mutate expanded state.
+                    if (!suppressExpandCollapseIntents && currentState.searchQuery.isBlank()) {
+                        populateChildren(event.path.lastPathComponent as DefaultMutableTreeNode, node.node)
+                        viewModel.processIntent(BookmarkIntent.ExpandNode(node.node.uuid))
+                    }
                 }
             }
 
             override fun treeCollapsed(event: javax.swing.event.TreeExpansionEvent) {
                 val node = (event.path.lastPathComponent as? DefaultMutableTreeNode)?.userObject as? NodeView
-                node?.let { viewModel.processIntent(BookmarkIntent.CollapseNode(it.node.uuid)) }
+                if (!suppressExpandCollapseIntents && currentState.searchQuery.isBlank()) {
+                    node?.let { viewModel.processIntent(BookmarkIntent.CollapseNode(it.node.uuid)) }
+                }
             }
         })
 
@@ -228,80 +252,28 @@ class BookmarkPanel(
         })
 
         val toolbar = JPanel(FlowLayout(FlowLayout.LEFT))
-        val addGroup = JButton("Add Group")
-        val addProcess = JButton("Add Process")
-        val addBookmark = JButton("Add CodeMark")
-        val addNote = JButton("Add Note")
-        val addStep = JButton("Add Step")
-        val editNode = JButton("Edit")
-        val moveNode = JButton("Move")
-        val deleteNode = JButton("Delete")
-        val setEntry = JButton("Set Entry")
         val refresh = JButton("Refresh")
-        val prev = JButton("Prev")
-        val next = JButton("Next")
-        val search = JButton("Search")
-        val clearSearch = JButton("Clear")
-        val showRefs = JButton("Refs")
-        val showGraph = JButton("Graph")
-        val openKeymap = JButton("Keymap")
-        val filterBookmarks = JToggleButton("B", true)
-        val filterProcesses = JToggleButton("P", true)
-        val filterNotes = JToggleButton("N", true)
-        val filterGroups = JToggleButton("G", false)
+        val collapseAllBtn = JButton("Collapse All")
+        val expandCurrent = JButton("Expand Current")
+        expandCurrentBtn = expandCurrent
 
-        addGroup.addActionListener { createGroup() }
-        addProcess.addActionListener { createProcess() }
-        addBookmark.addActionListener { createBookmark() }
-        addNote.addActionListener { createDescriptive() }
-        addStep.addActionListener { addToProcessStep() }
-        editNode.addActionListener { editSelected() }
-        moveNode.addActionListener { moveSelected() }
-        deleteNode.addActionListener { deleteSelected() }
-        setEntry.addActionListener { setProcessEntry() }
         refresh.addActionListener { viewModel.processIntent(BookmarkIntent.Refresh) }
-        prev.addActionListener { viewModel.processIntent(BookmarkIntent.NavigateToPrevInProcess) }
-        next.addActionListener { viewModel.processIntent(BookmarkIntent.NavigateToNextInProcess) }
-        search.addActionListener { startSearch() }
+        collapseAllBtn.addActionListener { collapseAll() }
+        expandCurrent.addActionListener { expandToCurrent() }
         searchField.addActionListener { startSearch() }
-        clearSearch.addActionListener { clearSearchAndRestore() }
-        showRefs.addActionListener { showReferenceOverview() }
-        showGraph.addActionListener { showReferenceGraph() }
-        openKeymap.addActionListener { openKeymapSettings() }
-        filterBookmarks.addActionListener { startSearch() }
-        filterProcesses.addActionListener { startSearch() }
-        filterNotes.addActionListener { startSearch() }
-        filterGroups.addActionListener { startSearch() }
 
-        toolbar.add(addGroup)
-        toolbar.add(addProcess)
-        toolbar.add(addBookmark)
-        toolbar.add(addNote)
-        toolbar.add(addStep)
-        toolbar.add(editNode)
-        toolbar.add(moveNode)
-        toolbar.add(deleteNode)
-        toolbar.add(setEntry)
         toolbar.add(refresh)
-        toolbar.add(prev)
-        toolbar.add(next)
+        toolbar.add(collapseAllBtn)
+        toolbar.add(expandCurrent)
         toolbar.add(JLabel("Query:"))
         toolbar.add(searchField)
-        toolbar.add(search)
-        toolbar.add(clearSearch)
-        toolbar.add(showRefs)
-        toolbar.add(showGraph)
-        toolbar.add(openKeymap)
-        toolbar.add(filterBookmarks)
-        toolbar.add(filterProcesses)
-        toolbar.add(filterNotes)
-        toolbar.add(filterGroups)
 
         add(toolbar, BorderLayout.NORTH)
         add(JBScrollPane(tree), BorderLayout.CENTER)
 
         installShortcuts()
         checkShortcutConflicts()
+        updateExpandCurrentButtonState()
 
         installSearchFieldListeners()
 
@@ -349,9 +321,9 @@ class BookmarkPanel(
 
     private fun installSearchFieldListeners() {
         searchField.document.addDocumentListener(object : DocumentListener {
-            override fun insertUpdate(e: DocumentEvent) = liveSearch()
-            override fun removeUpdate(e: DocumentEvent) = liveSearch()
-            override fun changedUpdate(e: DocumentEvent) = liveSearch()
+            override fun insertUpdate(e: DocumentEvent) = scheduleLiveSearch()
+            override fun removeUpdate(e: DocumentEvent) = scheduleLiveSearch()
+            override fun changedUpdate(e: DocumentEvent) = scheduleLiveSearch()
         })
 
         tree.addKeyListener(object : java.awt.event.KeyAdapter() {
@@ -362,7 +334,52 @@ class BookmarkPanel(
                     }
                 }
             }
+            override fun keyPressed(e: java.awt.event.KeyEvent) {
+                if (currentState.searchQuery.isBlank() || searchMatchRows.isEmpty()) return
+                when (e.keyCode) {
+                    java.awt.event.KeyEvent.VK_UP -> {
+                        val row = tree.selectionRows?.firstOrNull() ?: 0
+                        val pos = searchMatchRows.indexOf(row)
+                        val prevIdx = when { pos > 0 -> pos - 1; pos == 0 -> -1; else -> searchMatchRows.indexOfLast { it < row }.takeIf { it >= 0 } ?: searchMatchRows.lastIndex }
+                        if (prevIdx >= 0) {
+                            isSelectionFromSearchNav = true
+                            tree.setSelectionRow(searchMatchRows[prevIdx])
+                            tree.scrollRowToVisible(searchMatchRows[prevIdx])
+                            e.consume()
+                        }
+                    }
+                    java.awt.event.KeyEvent.VK_DOWN -> {
+                        val row = tree.selectionRows?.firstOrNull() ?: -1
+                        val pos = searchMatchRows.indexOf(row)
+                        val nextIdx = when { pos >= 0 && pos < searchMatchRows.lastIndex -> pos + 1; pos == searchMatchRows.lastIndex -> -1; else -> searchMatchRows.indexOfFirst { it > row }.takeIf { it >= 0 } ?: 0 }
+                        if (nextIdx >= 0 && nextIdx < searchMatchRows.size) {
+                            isSelectionFromSearchNav = true
+                            tree.setSelectionRow(searchMatchRows[nextIdx])
+                            tree.scrollRowToVisible(searchMatchRows[nextIdx])
+                            e.consume()
+                        }
+                    }
+                    java.awt.event.KeyEvent.VK_ENTER -> {
+                        val node = selectedNode() ?: return
+                        if (node.uuid in currentState.searchResults.map { it.uuid }.toSet()) {
+                            SelectionBus.getInstance(project).setCurrentContainerId(currentContainerId())
+                            SelectionBus.getInstance(project).setLastSelectedNodeId(node.uuid)
+                            viewModel.processIntent(BookmarkIntent.NavigateToNode(node.uuid))
+                            e.consume()
+                        }
+                    }
+                    else -> {}
+                }
+            }
         })
+    }
+
+    private fun scheduleLiveSearch() {
+        searchDebounceTimer?.stop()
+        searchDebounceTimer = javax.swing.Timer(300) {
+            searchDebounceTimer = null
+            liveSearch()
+        }.apply { isRepeats = false; start() }
     }
 
     private fun liveSearch() {
@@ -370,6 +387,9 @@ class BookmarkPanel(
         if (query.isBlank()) {
             viewModel.processIntent(BookmarkIntent.ClearSearch)
         } else {
+            if (currentState.searchQuery.isBlank()) {
+                lastSelectedBeforeSearch = selectedNode()?.uuid
+            }
             viewModel.processIntent(BookmarkIntent.Search(query, activeFilters()))
         }
     }
@@ -382,9 +402,13 @@ class BookmarkPanel(
         currentTargetsBySource = state.referenceTargetsBySource
         currentSourcesByTarget = state.referenceSourcesByTarget
         currentPathMap = state.rootNode?.let { buildPathMap(it) } ?: emptyMap()
+        if (state.searchQuery.isNotBlank() && savedExpandedOnSearchStart == null) {
+            savedExpandedOnSearchStart = state.expandedNodeIds
+        }
         val rootNode = state.rootNode
+        val isSearchActive = state.searchQuery.isNotBlank()
         val newRootNode = when {
-            state.searchQuery.isNotBlank() -> buildSearchTree(state)
+            rootNode != null && isSearchActive -> buildSearchTree(state)
             rootNode != null -> buildTreeNodeLazy(
                 rootNode,
                 state.referenceCounts,
@@ -405,10 +429,55 @@ class BookmarkPanel(
                 treeModel.setRoot(newRootNode)
             }
         }
-        restoreExpandedNodes(state.expandedNodeIds)
+        val expandedToRestore = if (state.searchQuery.isBlank() && savedExpandedOnSearchStart != null) {
+            val saved = savedExpandedOnSearchStart!!
+            savedExpandedOnSearchStart = null
+            saved
+        } else {
+            state.expandedNodeIds
+        }
+        if (isSearchActive) {
+            // IDEA-like behavior: keep original hierarchy, but show only matches and their ancestors,
+            // and expand everything so results are visible.
+            suppressExpandCollapseIntents = true
+            try {
+                expandAllRows()
+            } finally {
+                suppressExpandCollapseIntents = false
+            }
+        } else {
+            restoreExpandedNodes(expandedToRestore)
+        }
+        (tree.cellRenderer as? BookmarkTreeCellRenderer)?.searchQuery = state.searchQuery
+        if (state.searchQuery.isNotBlank() && state.searchResults.isNotEmpty()) {
+            val matchIds = state.searchResults.map { it.uuid }.toSet()
+            searchMatchRows = (0 until tree.rowCount).filter { row ->
+                val path = tree.getPathForRow(row) ?: return@filter false
+                val last = path.lastPathComponent as? DefaultMutableTreeNode ?: return@filter false
+                (last.userObject as? NodeView)?.node?.uuid in matchIds
+            }
+        } else {
+            searchMatchRows = emptyList()
+        }
         pendingSelectionAfterClear?.let { pending ->
             pendingSelectionAfterClear = null
             selectNodeById(pending)
+        }
+        state.selectedNodeId?.let { nodeId ->
+            renderer.highlightNodeId = nodeId
+            tree.repaint()
+            javax.swing.SwingUtilities.invokeLater {
+                selectNodeWithRetry(nodeId, maxRetries = 5, delayMs = 100)
+                updateExpandCurrentButtonState()
+            }
+        }
+    }
+
+    private fun expandAllRows() {
+        var row = 0
+        while (row < tree.rowCount) {
+            tree.expandRow(row)
+            row++
         }
     }
 
@@ -649,7 +718,7 @@ class BookmarkPanel(
     }
 
     private fun clearSearchAndRestore() {
-        val restoreId = lastSelectedBeforeSearch
+        val restoreId = selectedNode()?.uuid ?: lastSelectedBeforeSearch
         pendingSelectionAfterClear = restoreId
         lastSelectedBeforeSearch = null
         viewModel.processIntent(BookmarkIntent.ClearSearch)
@@ -1703,12 +1772,38 @@ class BookmarkPanel(
         return currentContainerId()
     }
 
+    private fun collapseAll() {
+        var row = tree.rowCount - 1
+        while (row >= 0) {
+            val path = tree.getPathForRow(row)
+            if (path == null) {
+                row--
+                continue
+            }
+            tree.collapsePath(path)
+            row--
+        }
+    }
+
+    private fun expandToCurrent() {
+        val nodeId = SelectionBus.getInstance(project).getLastSelectedNodeId() ?: return
+        selectNodeById(nodeId)
+        tree.selectionPath?.let { path ->
+            tree.expandPath(path)
+            tree.scrollPathToVisible(path)
+        }
+    }
+
+    private fun updateExpandCurrentButtonState() {
+        expandCurrentBtn?.isEnabled = SelectionBus.getInstance(project).getLastSelectedNodeId() != null
+    }
+
     private fun createPopupMenu(): JPopupMenu {
         val menu = JPopupMenu()
         menu.add(actionItem("Add Group") { createGroup() })
 //        menu.add(actionItem("Add Process") { createProcess() })
-        menu.add(actionItem("Add CodeMark") { createBookmark() })
-        menu.add(actionItem("Add Note") { createDescriptive() })
+//        menu.add(actionItem("Add CodeMark") { createBookmark() })
+//        menu.add(actionItem("Add Note") { createDescriptive() })
         menu.addSeparator()
         menu.add(actionItem("Edit") { editSelected() })
         menu.add(actionItem("Move") { moveSelected() })
@@ -1731,14 +1826,25 @@ class BookmarkPanel(
 //        menu.add(actionItem("Navigate") { navigateSelectedBookmark() })
         menu.add(actionItem("Delete") { deleteSelected() })
         menu.addSeparator()
-        menu.add(actionItem("Prev in Process") {
-            viewModel.processIntent(BookmarkIntent.NavigateToPrevInProcess)
-        })
-        menu.add(actionItem("Next in Process") {
-            viewModel.processIntent(BookmarkIntent.NavigateToNextInProcess)
-        })
+//        menu.add(actionItem("Prev in Process") {
+//            viewModel.processIntent(BookmarkIntent.NavigateToPrevInProcess)
+//        })
+//        menu.add(actionItem("Next in Process") {
+//            viewModel.processIntent(BookmarkIntent.NavigateToNextInProcess)
+//        })
+        menu.add(actionItem("Prev CodeMark") { navigateToPrevCodemarkGlobal() })
+        menu.add(actionItem("Next CodeMark") { navigateToNextCodemarkGlobal() })
         menu.addSeparator()
         menu.add(actionItem("Refresh") { viewModel.processIntent(BookmarkIntent.Refresh) })
+        val jumpToCurrentItem = actionItem("Jump to current") { expandToCurrent() }
+        menu.add(jumpToCurrentItem)
+        menu.addPopupMenuListener(object : javax.swing.event.PopupMenuListener {
+            override fun popupMenuWillBecomeVisible(e: javax.swing.event.PopupMenuEvent) {
+                jumpToCurrentItem.isEnabled = SelectionBus.getInstance(project).getLastSelectedNodeId() != null
+            }
+            override fun popupMenuWillBecomeInvisible(e: javax.swing.event.PopupMenuEvent) {}
+            override fun popupMenuCanceled(e: javax.swing.event.PopupMenuEvent) {}
+        })
         return menu
     }
 
@@ -1755,7 +1861,10 @@ class BookmarkPanel(
         val actionIds = listOf(
             "CodeRemarkTour.CreateBookmarkAtCaret",
             "CodeRemarkTour.CreateGroupAtCaret",
-            "CodeRemarkTour.CreateNoteAtCaret"
+            "CodeRemarkTour.CreateNoteAtCaret",
+            "CodeRemarkTour.NextCodemark",
+            "CodeRemarkTour.PrevCodemark",
+            "CodeRemarkTour.DeleteCodeMarkAtCaret"
         )
         val conflicts = mutableListOf<String>()
         actionIds.forEach { actionId ->
@@ -1832,8 +1941,11 @@ class BookmarkPanel(
             is BookmarkSideEffect.SelectNode -> {
                 logger.info("[SELECT_NODE] Side effect received: nodeId=${effect.nodeId}")
                 SelectionBus.getInstance(project).setLastSelectedNodeId(effect.nodeId)
+                renderer.highlightNodeId = effect.nodeId
+                tree.repaint()
                 // 使用重试机制，因为树更新可能是异步的
                 selectNodeWithRetry(effect.nodeId, maxRetries = 5, delayMs = 100)
+                updateExpandCurrentButtonState()
             }
             is BookmarkSideEffect.RefreshInlays -> {
                 // Gutter + line-end painter: refresh highlighters and repaint (EditorLinePainter reads index on paint)
@@ -1877,47 +1989,80 @@ class BookmarkPanel(
         viewModel.processIntent(BookmarkIntent.NavigateToBookmark(node))
     }
 
+    private fun navigateToNextCodemarkGlobal() {
+        val locator = ServiceLocator.get(project)
+        val currentId = SelectionBus.getInstance(project).getLastSelectedNodeId()
+        val entry = runBlocking {
+            locator.globalCodemarkNavigationUseCase.findNext(currentId)
+        } ?: return
+        SelectionBus.getInstance(project).setLastSelectedNodeId(entry.nodeId)
+        CodemarkNavigationHelper.navigateToEntry(project, entry.filePath, entry.line, entry.column)
+        viewModel.processIntent(BookmarkIntent.NavigateToNode(entry.nodeId))
+    }
+
+    private fun navigateToPrevCodemarkGlobal() {
+        val locator = ServiceLocator.get(project)
+        val currentId = SelectionBus.getInstance(project).getLastSelectedNodeId()
+        val entry = runBlocking {
+            locator.globalCodemarkNavigationUseCase.findPrevious(currentId)
+        } ?: return
+        SelectionBus.getInstance(project).setLastSelectedNodeId(entry.nodeId)
+        CodemarkNavigationHelper.navigateToEntry(project, entry.filePath, entry.line, entry.column)
+        viewModel.processIntent(BookmarkIntent.NavigateToNode(entry.nodeId))
+    }
+
     private fun navigateToFile(filePath: String, line: Int, column: Int) {
         logger.info("navigateToFile called: filePath=$filePath, line=$line, column=$column")
-        val file = LocalFileSystem.getInstance().findFileByPath(filePath)
+        val lfs = LocalFileSystem.getInstance()
+        val basePath = project.basePath
+        val candidates = linkedSetOf<String>()
+
+        // Try both dependent/independent formats, and relative-to-project resolution.
+        val dependent = FileUtil.toSystemDependentName(filePath)
+        val independent = FileUtil.toSystemIndependentName(filePath)
+        candidates.add(dependent)
+        candidates.add(independent)
+        if (basePath != null) {
+            val depFile = java.io.File(dependent)
+            if (!depFile.isAbsolute) {
+                candidates.add(java.io.File(basePath, dependent).canonicalPath)
+            }
+            val indepFile = java.io.File(independent)
+            if (!indepFile.isAbsolute) {
+                candidates.add(FileUtil.toSystemIndependentName(java.io.File(basePath, independent).canonicalPath))
+            }
+        }
+
+        val file = candidates.asSequence()
+            .mapNotNull { path -> lfs.refreshAndFindFileByPath(path) }
+            .firstOrNull()
+
         if (file == null) {
-            logger.error("navigateToFile: file not found for path=$filePath")
+            logger.error("navigateToFile: file not found for path=$filePath, candidates=$candidates")
+            notify("Navigate failed: file not found: $filePath", NotificationType.WARNING)
             return
         }
-        logger.info("navigateToFile: file found, opening file and scrolling to line=$line without moving cursor")
-        
-        // 打开文件但不请求焦点（保持焦点在树组件上，以便识别快捷键）
+        logger.info("navigateToFile: file found, opening file and moving caret to line=$line")
         val fileEditorManager = FileEditorManager.getInstance(project)
-        fileEditorManager.openFile(file, false)
-        
-        // 使用 invokeLater 确保编辑器已完全初始化
+        fileEditorManager.openFile(file, true)
         javax.swing.SwingUtilities.invokeLater {
-            // 获取文本编辑器并滚动到指定行（居中显示），但不移动光标
+            val targetLine = line.coerceAtLeast(0)
             val editors = fileEditorManager.getEditors(file)
             editors.forEach { editor ->
                 (editor as? TextEditor)?.editor?.let { textEditor ->
-                    val targetLine = line.coerceAtLeast(0)
                     val document = textEditor.document
                     if (targetLine < document.lineCount) {
-                        // 保存当前光标位置
-                        val primaryCaret = textEditor.caretModel.primaryCaret
-                        val savedOffset = primaryCaret.offset
-                        
-                        // 临时移动光标到目标行（用于滚动）
-                        val targetOffset = document.getLineStartOffset(targetLine)
-                        primaryCaret.moveToOffset(targetOffset)
-                        
-                        // 滚动到光标位置并居中显示
+                        val lineStart = document.getLineStartOffset(targetLine)
+                        val lineEnd = document.getLineEndOffset(targetLine)
+                        val col = column.coerceAtLeast(0).coerceAtMost((lineEnd - lineStart).coerceAtLeast(0))
+                        val targetOffset = lineStart + col
+                        textEditor.caretModel.primaryCaret.moveToOffset(targetOffset)
                         textEditor.scrollingModel.scrollToCaret(ScrollType.CENTER)
-                        
-                        // 恢复原来的光标位置
-                        primaryCaret.moveToOffset(savedOffset)
-                        
-                        logger.info("navigateToFile: scrolled to line $targetLine and restored cursor position")
+                        logger.info("navigateToFile: moved caret to line $targetLine and scrolled")
                     }
                 }
             }
-            BookmarkHighlighterService.getInstance(project).flashLineForFile(filePath, line.coerceAtLeast(0))
+            BookmarkHighlighterService.getInstance(project).flashLineForFile(file.path, targetLine)
             logger.info("navigateToFile: navigation completed")
         }
     }
@@ -1986,6 +2131,8 @@ class BookmarkPanel(
 
 
     override fun dispose() {
+        searchDebounceTimer?.stop()
+        searchDebounceTimer = null
         scope.cancel()
     }
 

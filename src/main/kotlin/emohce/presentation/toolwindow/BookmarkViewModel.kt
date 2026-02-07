@@ -63,8 +63,8 @@ class BookmarkViewModel(
         return withContext(dispatchers.io) {
             val node = bookmarkRepository.findByUuid(lastSelectedNodeId) ?: return@withContext "root" to null
             when (node) {
-                is BookmarkNode.Group -> node.uuid to node.children.size
-                is BookmarkNode.Process -> node.uuid to node.steps.size
+                is BookmarkNode.Group -> node.uuid to 0
+                is BookmarkNode.Process -> node.uuid to 0
                 is BookmarkNode.Bookmark, is BookmarkNode.DescriptiveBookmark ->
                     bookmarkRepository.getInsertPositionAfterNode(lastSelectedNodeId) ?: ("root" to null)
                 else -> "root" to null
@@ -96,6 +96,7 @@ class BookmarkViewModel(
                 is BookmarkIntent.SyncReferences -> handleSyncReferences(intent.sourceId)
                 is BookmarkIntent.DeleteReferences -> handleDeleteReferences(intent.sourceId)
                 is BookmarkIntent.NavigateToBookmark -> handleNavigateToBookmark(intent.bookmark)
+                is BookmarkIntent.NavigateToNode -> handleNavigateToNode(intent.nodeId)
                 is BookmarkIntent.NavigateToNextInProcess -> handleNavigateNext()
                 is BookmarkIntent.NavigateToPrevInProcess -> handleNavigatePrevious()
                 is BookmarkIntent.Search -> handleSearch(intent.query, intent.filters)
@@ -528,9 +529,42 @@ class BookmarkViewModel(
         logger.info("handleNavigateToBookmark completed")
     }
 
+    private suspend fun handleNavigateToNode(nodeId: String) {
+        val node = bookmarkRepository.findByUuid(nodeId) ?: return
+        _state.update { it.copy(selectedNodeId = nodeId) }
+        when (node) {
+            is BookmarkNode.Bookmark -> {
+                _sideEffects.emit(BookmarkSideEffect.NavigateToFile(node.filePath, node.line, node.column))
+                val progress = processNavigationUseCase.getProgress(node)
+                _state.update { it.copy(processProgress = progress) }
+            }
+            is BookmarkNode.Process -> {
+                node.entryFilePath?.let { path ->
+                    val line = node.entryLine ?: 0
+                    _sideEffects.emit(BookmarkSideEffect.NavigateToFile(path, line, 0))
+                }
+            }
+            else -> Unit
+        }
+        _sideEffects.emit(BookmarkSideEffect.SelectNode(nodeId))
+    }
+
     private suspend fun handleNavigateNext() {
-        val currentId = _state.value.selectedNodeId ?: return
-        val current = bookmarkRepository.findByUuid(currentId) as? BookmarkNode.Bookmark ?: return
+        val currentId = _state.value.selectedNodeId
+        if (currentId == null) {
+            _sideEffects.emit(BookmarkSideEffect.ShowNotification("No selection to navigate", NotificationType.INFORMATION))
+            return
+        }
+        val selected = bookmarkRepository.findByUuid(currentId)
+        val current = when (selected) {
+            is BookmarkNode.Bookmark -> selected
+            is BookmarkNode.Process -> selected.flattenNavigableBookmarks().firstOrNull()
+            else -> null
+        }
+        if (current == null) {
+            _sideEffects.emit(BookmarkSideEffect.ShowNotification("Select a CodeMark in a process to navigate", NotificationType.INFORMATION))
+            return
+        }
 
         val next = processNavigationUseCase.findNext(current)
         if (next != null) {
@@ -541,8 +575,21 @@ class BookmarkViewModel(
     }
 
     private suspend fun handleNavigatePrevious() {
-        val currentId = _state.value.selectedNodeId ?: return
-        val current = bookmarkRepository.findByUuid(currentId) as? BookmarkNode.Bookmark ?: return
+        val currentId = _state.value.selectedNodeId
+        if (currentId == null) {
+            _sideEffects.emit(BookmarkSideEffect.ShowNotification("No selection to navigate", NotificationType.INFORMATION))
+            return
+        }
+        val selected = bookmarkRepository.findByUuid(currentId)
+        val current = when (selected) {
+            is BookmarkNode.Bookmark -> selected
+            is BookmarkNode.Process -> selected.flattenNavigableBookmarks().lastOrNull()
+            else -> null
+        }
+        if (current == null) {
+            _sideEffects.emit(BookmarkSideEffect.ShowNotification("Select a CodeMark in a process to navigate", NotificationType.INFORMATION))
+            return
+        }
 
         val previous = processNavigationUseCase.findPrevious(current)
         if (previous != null) {
@@ -615,6 +662,7 @@ sealed class BookmarkIntent {
     data class SyncReferences(val sourceId: String) : BookmarkIntent()
     data class DeleteReferences(val sourceId: String) : BookmarkIntent()
     data class NavigateToBookmark(val bookmark: BookmarkNode.Bookmark) : BookmarkIntent()
+    data class NavigateToNode(val nodeId: String) : BookmarkIntent()
     data object NavigateToNextInProcess : BookmarkIntent()
     data object NavigateToPrevInProcess : BookmarkIntent()
     data class Search(val query: String, val filters: Set<SearchFilter>) : BookmarkIntent()
