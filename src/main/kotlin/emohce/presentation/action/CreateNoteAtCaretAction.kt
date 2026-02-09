@@ -32,7 +32,7 @@ class CreateNoteAtCaretAction : AnAction() {
 
         SelectionBus.getInstance(project).requestSelect(note.uuid)
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("CodeRemarkTour")
+            .getNotificationGroup("CodeMark")
             .createNotification("Note created", NotificationType.INFORMATION)
             .notify(project)
     }

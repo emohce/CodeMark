@@ -282,7 +282,7 @@ class BookmarkHighlighterService(private val project: Project) {
                 override fun getClickAction() = object : com.intellij.openapi.actionSystem.AnAction("Select Bookmark") {
                     override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
                         logger.info("[GUTTER_HIGHLIGHT] click node=${entry.nodeId} line=$line")
-                        toolWindowManager.getToolWindow("CodeRemarkTour")?.show(null)
+                        toolWindowManager.getToolWindow("CodeMark")?.show(null)
                         CodemarkNavigationHelper.navigateToEntry(project, entry.filePath, line, 0)
                         com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
                             selectionBus.requestSelect(entry.nodeId, entry.filePath, line)
@@ -302,7 +302,7 @@ class BookmarkHighlighterService(private val project: Project) {
                                 selectionBus.setLastSelectedNodeId(nextEntry.nodeId)
                                 CodemarkNavigationHelper.navigateToEntry(project, nextEntry.filePath, nextEntry.line, nextEntry.column)
                                 viewModel.processIntent(BookmarkIntent.NavigateToNode(nextEntry.nodeId))
-                                toolWindowManager.getToolWindow("CodeRemarkTour")?.show(null)
+                                toolWindowManager.getToolWindow("CodeMark")?.show(null)
                             }
                         }
                     })
@@ -316,7 +316,7 @@ class BookmarkHighlighterService(private val project: Project) {
                                 selectionBus.setLastSelectedNodeId(prevEntry.nodeId)
                                 CodemarkNavigationHelper.navigateToEntry(project, prevEntry.filePath, prevEntry.line, prevEntry.column)
                                 viewModel.processIntent(BookmarkIntent.NavigateToNode(prevEntry.nodeId))
-                                toolWindowManager.getToolWindow("CodeRemarkTour")?.show(null)
+                                toolWindowManager.getToolWindow("CodeMark")?.show(null)
                             }
                         }
                     })

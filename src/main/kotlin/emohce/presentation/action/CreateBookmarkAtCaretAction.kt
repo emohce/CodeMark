@@ -55,7 +55,7 @@ class CreateBookmarkAtCaretAction : AnAction() {
                 locator.bookmarkViewModel.processIntent(BookmarkIntent.EditNode(edited))
             }
             NotificationGroupManager.getInstance()
-                .getNotificationGroup("CodeRemarkTour")
+                .getNotificationGroup("CodeMark")
                 .createNotification("CodeMark updated", NotificationType.INFORMATION)
                 .notify(project)
             return
@@ -88,7 +88,7 @@ class CreateBookmarkAtCaretAction : AnAction() {
         }
         logger.info("[ACTION_CREATE_BOOKMARK] processIntent completed, SelectNode side effect will handle tree selection")
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("CodeRemarkTour")
+            .getNotificationGroup("CodeMark")
             .createNotification("CodeMark created", NotificationType.INFORMATION)
             .notify(project)
     }

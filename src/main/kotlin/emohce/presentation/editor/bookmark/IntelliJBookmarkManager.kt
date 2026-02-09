@@ -19,7 +19,7 @@ import java.lang.reflect.Constructor
  */
 class IntelliJBookmarkManager(private val project: Project) {
     private val logger = Logger.getInstance(IntelliJBookmarkManager::class.java)
-    private val groupName = "CodeRemarkTour"
+    private val groupName = "CodeMark"
     
     private val manager: BookmarksManager?
         get() = BookmarksManager.getInstance(project)

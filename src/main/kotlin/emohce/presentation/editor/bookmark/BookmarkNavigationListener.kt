@@ -207,7 +207,7 @@ class BookmarkNavigationListener(private val project: Project) {
     private fun openToolWindow() {
         try {
             val toolWindowManager = ToolWindowManager.getInstance(project)
-            val toolWindow = toolWindowManager.getToolWindow("CodeRemarkTour")
+            val toolWindow = toolWindowManager.getToolWindow("CodeMark")
             if (toolWindow != null) {
                 toolWindow.show {
                     logger.info("[BOOKMARK_NAV] Tool window opened")

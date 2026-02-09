@@ -1859,12 +1859,12 @@ class BookmarkPanel(
     private fun checkShortcutConflicts() {
         val keymap = KeymapManager.getInstance().activeKeymap
         val actionIds = listOf(
-            "CodeRemarkTour.CreateBookmarkAtCaret",
-            "CodeRemarkTour.CreateGroupAtCaret",
-            "CodeRemarkTour.CreateNoteAtCaret",
-            "CodeRemarkTour.NextCodemark",
-            "CodeRemarkTour.PrevCodemark",
-            "CodeRemarkTour.DeleteCodeMarkAtCaret"
+            "CodeMark.CreateBookmarkAtCaret",
+            "CodeMark.CreateGroupAtCaret",
+            "CodeMark.CreateNoteAtCaret",
+            "CodeMark.NextCodemark",
+            "CodeMark.PrevCodemark",
+            "CodeMark.DeleteCodeMarkAtCaret"
         )
         val conflicts = mutableListOf<String>()
         actionIds.forEach { actionId ->
@@ -2080,7 +2080,7 @@ class BookmarkPanel(
 
     private fun notify(message: String, type: NotificationType) {
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("CodeRemarkTour")
+            .getNotificationGroup("CodeMark")
             .createNotification(message, type)
             .notify(project)
     }

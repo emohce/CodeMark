@@ -39,7 +39,7 @@ class CreateProcessAtCaretAction : AnAction() {
 
         SelectionBus.getInstance(project).requestSelect(process.uuid)
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("CodeRemarkTour")
+            .getNotificationGroup("CodeMark")
             .createNotification("Process created", NotificationType.INFORMATION)
             .notify(project)
     }

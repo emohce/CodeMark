@@ -25,7 +25,7 @@ class CreateGroupAtCaretAction : AnAction() {
 
         SelectionBus.getInstance(project).requestSelect(group.uuid)
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("CodeRemarkTour")
+            .getNotificationGroup("CodeMark")
             .createNotification("Group created", NotificationType.INFORMATION)
             .notify(project)
     }
