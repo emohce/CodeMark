@@ -208,7 +208,8 @@ cd CodeRemarkTour
 1. 克隆项目到本地
 2. 确保 JDK 21 已安装
 3. 运行 `./gradlew runIde` 启动开发环境
-4. 在沙盒 IDE 中测试插件功能
+4. 构建 zip `./gradlew buildPlugin` 创建插件包
+5. 在沙盒 IDE 中测试插件功能
 
 ### 代码规范
 - 遵循 Kotlin 官方编码规范

@@ -209,7 +209,8 @@ cd CodeRemarkTour
 1. Clone the project locally
 2. Ensure JDK 21 is installed
 3. Run `./gradlew runIde` to start development environment
-4. Test plugin functionality in sandbox IDE
+4. Build zip `./gradlew buildPlugin` to create plugin package
+5. Test plugin functionality in sandbox IDE
 
 ### Code Standards
 - Follow Kotlin official coding standards
