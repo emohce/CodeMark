@@ -2,6 +2,8 @@
 
 结构化书签与流程导航插件，提供工具窗口、编辑器联动、引用关系与流程步进导航，面向大项目的"代码导览 + 备注"场景。
 
+[📖 English Version](./README_EN.md)
+
 ## 概览
 
 **CodeMark** 是一个 IntelliJ IDEA 插件，提供结构化的代码书签管理功能，支持：
@@ -14,7 +16,7 @@
 
 ### 核心特性
 
-- **四种节点类型**：Bookmark（书签）、Group（分组）、Process（流程）、DescriptiveBookmark（描述性书签）
+- **四种节点类型**：Bookmark（书签）、Group（分组）、Process（流程-暂未实现）、DescriptiveBookmark（描述性书签）
 - **精确定位**：基于文件路径、行号、列号的精确导航
 - **引用管理**：节点间引用关系，支持循环检测
 - **流程导航**：流程节点的上一条/下一条步进功能
@@ -133,7 +135,7 @@ cd CodeRemarkTour
 - **循环检测**：自动检测并防止引用循环
 - **引用计数**：跟踪节点被引用次数
 
-### 流程管理
+### 流程管理 (暂未实现)
 - **流程节点**：将相关书签组织成流程
 - **步进导航**：流程内上一条/下一条导航
 - **进度跟踪**：显示当前流程进度
@@ -228,7 +230,7 @@ cd CodeRemarkTour
 
 感谢 IntelliJ Platform 提供的插件开发框架，以及相关开源项目的启发：
 
-- **[CodeTour](https://github.com/LefterisXris/CodeTour)** - VS Code 代码导览插件，为流程导航功能提供设计灵感
+- **[CodeTour](https://github.com/LefterisXris/CodeTour)** - IntelliJ 代码导览插件，为流程导航功能提供设计灵感
 - **[Bookmark-X](https://github.com/Nonoas/Bookmark-X)** - IntelliJ 书签管理插件，为编辑器集成提供参考实现
 
 这些项目在代码书签管理和导航功能方面的探索为本项目提供了宝贵的经验和思路。
