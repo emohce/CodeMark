@@ -1,1 +1,1 @@
-rootProject.name = "CodeRemarkTour"
+rootProject.name = "CodeMarks"

@@ -10,7 +10,7 @@ import emohce.presentation.editor.bookmark.BookmarkNavigationListener
 import emohce.presentation.toolwindow.panel.BookmarkPanel
 import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 
-class CodeMarkToolWindowFactory : ToolWindowFactory {
+class CodeMarksToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
         val locator = ServiceLocator.get(project)
         val viewModel = BookmarkViewModel(

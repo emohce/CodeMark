@@ -5,7 +5,7 @@
 
     <!-- Public plugin name should be written in Title Case.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/best-practices-for-listing.html#plugin-name -->
-    <name>CodeMark</name>
+    <name>CodeMarks</name>
 
     <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
     <vendor>emohce</vendor>
@@ -25,13 +25,13 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup
-            id="CodeMark"
+            id="CodeMarks"
             displayType="BALLOON"
             isLogByDefault="true"/>
         <editor.linePainter implementation="emohce.presentation.editor.linepainter.BookmarkLineEndPainter"/>
         <toolWindow
-            id="CodeMark"
-            factoryClass="emohce.presentation.toolwindow.CodeMarkToolWindowFactory"
+            id="CodeMarks"
+            factoryClass="emohce.presentation.toolwindow.CodeMarksToolWindowFactory"
             icon="/META-INF/pluginIcon.png"
             anchor="right"
             secondary="false"/>
@@ -39,48 +39,48 @@
     </extensions>
 
     <actions>
-        <action id="CodeMark.CreateBookmarkAtCaret"
+        <action id="CodeMarks.CreateBookmarkAtCaret"
                 class="emohce.presentation.action.CreateBookmarkAtCaretAction"
                 text="Add CodeMark Here"
                 description="Create a codemark at the current caret">
             <keyboard-shortcut keymap="$default" first-keystroke="shift F2"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMark.CreateProcessAtCaret"
+        <action id="CodeMarks.CreateProcessAtCaret"
                 class="emohce.presentation.action.CreateProcessAtCaretAction"
                 text="Add Process Entry Here"
                 description="Create a process with entry at the current caret">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMark.CreateGroupAtCaret"
+        <action id="CodeMarks.CreateGroupAtCaret"
                 class="emohce.presentation.action.CreateGroupAtCaretAction"
                 text="Add Group Here"
                 description="Create a group under the current selection">
             <keyboard-shortcut keymap="$default" first-keystroke="shift F3"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMark.CreateNoteAtCaret"
+        <action id="CodeMarks.CreateNoteAtCaret"
                 class="emohce.presentation.action.CreateNoteAtCaretAction"
                 text="Add Note Here"
                 description="Create a note under the current selection">
             <keyboard-shortcut keymap="$default" first-keystroke="shift F4"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMark.NextCodemark"
+        <action id="CodeMarks.NextCodemark"
                 class="emohce.presentation.action.NextCodemarkAction"
                 text="Next CodeMark"
                 description="Go to next CodeMark in tree order">
             <keyboard-shortcut keymap="$default" first-keystroke="alt shift DOWN"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMark.PrevCodemark"
+        <action id="CodeMarks.PrevCodemark"
                 class="emohce.presentation.action.PrevCodemarkAction"
                 text="Prev CodeMark"
                 description="Go to previous CodeMark in tree order">
             <keyboard-shortcut keymap="$default" first-keystroke="alt shift UP"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMark.DeleteCodeMarkAtCaret"
+        <action id="CodeMarks.DeleteCodeMarkAtCaret"
                 class="emohce.presentation.action.DeleteCodeMarkAtCaretAction"
                 text="Delete CodeMark"
                 description="Delete CodeMark at current line">
