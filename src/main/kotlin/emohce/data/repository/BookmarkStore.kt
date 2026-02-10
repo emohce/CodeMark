@@ -1,5 +1,6 @@
 package emohce.data.repository
 
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.util.io.FileUtil
@@ -10,9 +11,30 @@ import emohce.data.persistence.NodeData
 import emohce.domain.model.BookmarkNode
 import emohce.domain.model.Reference
 import java.io.File
+import java.nio.file.Path
+
+/** 单个根文件的内存表示 */
+data class RootFileEntry(
+    val filePath: Path,
+    var root: BookmarkNode.Group,
+    val references: MutableList<Reference>
+)
 
 class BookmarkStore(private val project: Project) {
+    private val logger = Logger.getInstance(BookmarkStore::class.java)
     private val dataSource = BookmarkPersistentDataSource(project)
+
+    /** 自身保存操作的时间戳，用于 VFS 监听器跳过自触发的文件变化 */
+    @Volatile
+    private var lastSaveTimestamp: Long = 0L
+
+    /** 判断是否是自身刚刚触发的保存（500ms 窗口内） */
+    fun isRecentSelfSave(): Boolean {
+        return System.currentTimeMillis() - lastSaveTimestamp < 500L
+    }
+
+    /** 按文件路径索引的所有根文件 */
+    val rootFiles: MutableMap<String, RootFileEntry> = linkedMapOf()
     
     /**
      * 将绝对路径转换为相对于项目根目录的相对路径
@@ -133,69 +155,224 @@ class BookmarkStore(private val project: Project) {
     }
     
 
+    /** 内存 stash：保存上一次操作前的快照，用于单步撤销 */
+    private var stash: Map<String, Pair<BookmarkNode.Group, List<Reference>>>? = null
+
+    /** 虚拟超级根：聚合所有文件根作为 children */
     var root: BookmarkNode.Group
         private set
 
+    /** 所有文件的引用合集 */
     val references: MutableList<Reference>
 
     init {
-        val state = dataSource.load()
-        if (state == null) {
-            root = BookmarkNode.Group(uuid = "root", name = ROOT_NODE_NAME)
-            references = mutableListOf()
+        references = mutableListOf()
+        root = BookmarkNode.Group(uuid = SUPER_ROOT_UUID, name = ROOT_NODE_NAME)
+        loadAllFiles()
+    }
+
+    /** 扫描 .codemark/ 目录加载所有根文件 */
+    private fun loadAllFiles() {
+        val basePath = project.basePath ?: return
+        rootFiles.clear()
+        references.clear()
+
+        val files = BookmarkPersistentDataSource.listRootFiles(basePath)
+        if (files.isEmpty()) {
+            // 无任何文件时，创建默认 codemark.json
+            val defaultRoot = BookmarkNode.Group(uuid = "root", name = "CodeMarks")
+            val defaultPath = BookmarkPersistentDataSource.dataPath(basePath)
+            val entry = RootFileEntry(defaultPath, defaultRoot, mutableListOf())
+            rootFiles[defaultPath.toString()] = entry
+            saveFileEntry(entry)
         } else {
-            // 从数据加载时，将相对路径转换为绝对路径
-            root = fromDataWithAbsolutePaths(state.root) as BookmarkNode.Group
-            references = state.references.map { BookmarkMapper.fromReferenceData(it) }.toMutableList()
+            for (filePath in files) {
+                val state = dataSource.loadFrom(filePath) ?: continue
+                val fileRoot = fromDataWithAbsolutePaths(state.root) as BookmarkNode.Group
+                val fileRefs = state.references.map { BookmarkMapper.fromReferenceData(it) }.toMutableList()
+                rootFiles[filePath.toString()] = RootFileEntry(filePath, fileRoot, fileRefs)
+                references.addAll(fileRefs)
+            }
+        }
+        rebuildSuperRoot()
+    }
+
+    /** 重建虚拟超级根：将所有文件根作为 children */
+    private fun rebuildSuperRoot() {
+        val children = rootFiles.values.map { it.root }
+        root = BookmarkNode.Group(
+            uuid = SUPER_ROOT_UUID,
+            name = ROOT_NODE_NAME,
+            children = children
+        )
+    }
+
+    /** 保存单个文件条目 */
+    private fun saveFileEntry(entry: RootFileEntry) {
+        val state = BookmarkPersistentState(
+            version = BookmarkPersistentState.CURRENT_VERSION,
+            root = toDataWithRelativePaths(entry.root) as NodeData.GroupData,
+            references = entry.references.map { BookmarkMapper.toReferenceData(it) }
+        )
+        dataSource.saveTo(entry.filePath, state)
+        lastSaveTimestamp = System.currentTimeMillis()
+    }
+
+    /** 保存所有文件（先将聚合引用同步回各文件条目） */
+    fun save() {
+        syncReferencesToFiles()
+        rootFiles.values.forEach { saveFileEntry(it) }
+    }
+
+    /** 将聚合 references 按 sourceId 所属文件分配回各 RootFileEntry */
+    private fun syncReferencesToFiles() {
+        // 清空各文件的引用
+        rootFiles.values.forEach { it.references.clear() }
+        // 按 sourceId 归属文件重新分配
+        for (ref in references) {
+            val entry = findOwnerFile(ref.sourceId)
+            entry?.references?.add(ref)
         }
     }
 
-    fun save(saveUndo: Boolean = true) {
-        // 保存时，将绝对路径转换为相对路径
-        val state = BookmarkPersistentState(
-            version = BookmarkPersistentState.CURRENT_VERSION,
-            root = toDataWithRelativePaths(root) as emohce.data.persistence.NodeData.GroupData,
-            references = references.map { BookmarkMapper.toReferenceData(it) }
-        )
-        dataSource.save(state, saveUndo)
+    /** 查找节点所属的根文件 */
+    fun findOwnerFile(nodeId: String): RootFileEntry? {
+        // 如果是文件根本身
+        for (entry in rootFiles.values) {
+            if (entry.root.uuid == nodeId) return entry
+            if (findNodeInGroup(entry.root, nodeId) != null) return entry
+        }
+        return null
     }
 
+    private fun findNodeInGroup(node: BookmarkNode, targetId: String): BookmarkNode? {
+        if (node.uuid == targetId) return node
+        return when (node) {
+            is BookmarkNode.Group -> node.children.firstNotNullOfOrNull { findNodeInGroup(it, targetId) }
+            is BookmarkNode.Process -> node.steps.firstNotNullOfOrNull { findNodeInGroup(it, targetId) }
+            else -> null
+        }
+    }
+
+    /** 替换虚拟超级根（实际替换对应文件的根） */
     fun replaceRoot(newRoot: BookmarkNode.Group) {
-        root = newRoot
-        save(saveUndo = true) // 保存时自动保存撤销文件
+        // 保存当前状态到 stash
+        stash = rootFiles.mapValues { (_, entry) ->
+            entry.root.copy() to entry.references.toList()
+        }
+
+        if (newRoot.uuid == SUPER_ROOT_UUID) {
+            // 替换整个超级根：更新每个文件根
+            for (child in newRoot.children) {
+                if (child is BookmarkNode.Group) {
+                    val entry = rootFiles.values.find { it.root.uuid == child.uuid }
+                    if (entry != null) {
+                        entry.root = child
+                        saveFileEntry(entry)
+                    }
+                }
+            }
+        } else {
+            // 替换某个文件的根
+            val entry = rootFiles.values.find { it.root.uuid == newRoot.uuid }
+            if (entry != null) {
+                entry.root = newRoot
+                saveFileEntry(entry)
+            } else {
+                // 尝试查找包含该节点的文件并替换其根
+                for (e in rootFiles.values) {
+                    if (findNodeInGroup(e.root, newRoot.uuid) != null) {
+                        // 这不应该发生，但作为安全回退
+                        logger.warn("replaceRoot called with non-root node uuid=${newRoot.uuid}")
+                        break
+                    }
+                }
+            }
+        }
+        // 重建引用合集
+        references.clear()
+        rootFiles.values.forEach { references.addAll(it.references) }
+        rebuildSuperRoot()
     }
 
+    /** 创建新的根文件 */
+    fun createNewRootFile(name: String): BookmarkNode.Group {
+        val basePath = project.basePath ?: throw IllegalStateException("Project basePath is null")
+        val filePath = BookmarkPersistentDataSource.createRootFilePath(basePath, name)
+        val newRoot = BookmarkNode.Group(name = name.trim())
+        val entry = RootFileEntry(filePath, newRoot, mutableListOf())
+        rootFiles[filePath.toString()] = entry
+        saveFileEntry(entry)
+        rebuildSuperRoot()
+        return newRoot
+    }
+
+    /** 跨文件移动节点 */
+    fun moveNodeAcrossFiles(nodeId: String, targetFileRootId: String) {
+        val sourceEntry = findOwnerFile(nodeId) ?: return
+        val targetEntry = rootFiles.values.find { it.root.uuid == targetFileRootId } ?: return
+        if (sourceEntry === targetEntry) return
+
+        val node = findNodeInGroup(sourceEntry.root, nodeId) ?: return
+        // 从源文件移除
+        sourceEntry.root = removeNodeFromGroup(sourceEntry.root, nodeId)
+        // 添加到目标文件
+        targetEntry.root = targetEntry.root.copy(
+            children = targetEntry.root.children + node
+        )
+        saveFileEntry(sourceEntry)
+        saveFileEntry(targetEntry)
+        rebuildSuperRoot()
+    }
+
+    private fun removeNodeFromGroup(group: BookmarkNode.Group, nodeId: String): BookmarkNode.Group {
+        return group.copy(
+            children = group.children
+                .filterNot { it.uuid == nodeId }
+                .map { child ->
+                    when (child) {
+                        is BookmarkNode.Group -> removeNodeFromGroup(child, nodeId)
+                        is BookmarkNode.Process -> child.copy(
+                            steps = child.steps.filterNot { it.uuid == nodeId }
+                        )
+                        else -> child
+                    }
+                }
+        )
+    }
+
+    /** 从内存 stash 恢复上一次操作前的状态 */
     fun undo(): Boolean {
-        val undoState = dataSource.loadUndo() ?: return false
-        // 从撤销数据加载时，将相对路径转换为绝对路径
-        root = fromDataWithAbsolutePaths(undoState.root) as BookmarkNode.Group
+        val snapshot = stash ?: return false
+        for ((key, pair) in snapshot) {
+            val entry = rootFiles[key] ?: continue
+            entry.root = pair.first
+            entry.references.clear()
+            entry.references.addAll(pair.second)
+            saveFileEntry(entry)
+        }
+        stash = null
         references.clear()
-        references.addAll(undoState.references.map { BookmarkMapper.fromReferenceData(it) })
-        // 撤销后保存，但不保存撤销文件（避免循环撤销）
-        save(saveUndo = false)
+        rootFiles.values.forEach { references.addAll(it.references) }
+        rebuildSuperRoot()
         return true
     }
 
-    fun canUndo(): Boolean = dataSource.hasUndo()
+    fun canUndo(): Boolean = stash != null
     
     companion object {
         const val ROOT_NODE_NAME = "CodeMarks"
+        const val SUPER_ROOT_UUID = "super-root"
     }
     
     fun reload() {
-        // 刷新 VFS 缓存，确保读取最新的文件内容
         val basePath = project.basePath ?: return
-        val bookmarkxPath = BookmarkPersistentDataSource.dataPath(basePath)
-        val normalizedPath = FileUtil.toSystemIndependentName(bookmarkxPath.toString())
-        val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath)
-        file?.refresh(false, false)
-        
-        val state = dataSource.load()
-        if (state != null) {
-            // 从数据加载时，将相对路径转换为绝对路径
-            root = fromDataWithAbsolutePaths(state.root) as BookmarkNode.Group
-            references.clear()
-            references.addAll(state.references.map { BookmarkMapper.fromReferenceData(it) })
-        }
+        // 刷新 VFS 缓存
+        val dir = BookmarkPersistentDataSource.dataDirPath(basePath)
+        val normalizedDir = FileUtil.toSystemIndependentName(dir.toString())
+        val vfsDir = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedDir)
+        vfsDir?.refresh(false, true)
+
+        loadAllFiles()
     }
 }

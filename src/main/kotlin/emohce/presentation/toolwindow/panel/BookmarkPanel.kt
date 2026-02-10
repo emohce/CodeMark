@@ -26,6 +26,7 @@ import emohce.presentation.action.CodemarkNavigationHelper
 import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 import emohce.presentation.index.BookmarkIndexService
 import emohce.presentation.selection.SelectionBus
+import emohce.data.repository.BookmarkStore
 import emohce.presentation.toolwindow.BookmarkIntent
 import emohce.presentation.toolwindow.BookmarkSideEffect
 import emohce.presentation.toolwindow.BookmarkViewModel
@@ -99,7 +100,8 @@ class BookmarkPanel(
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
         searchField = JTextField(24)
         tree = Tree(treeModel)
-        tree.isRootVisible = true
+        tree.isRootVisible = false
+        tree.showsRootHandles = true
         tree.cellRenderer = renderer
         tree.selectionModel.selectionMode = TreeSelectionModel.DISCONTIGUOUS_TREE_SELECTION
         tree.addTreeSelectionListener {
@@ -255,16 +257,19 @@ class BookmarkPanel(
         val refresh = JButton("Refresh")
         val collapseAllBtn = JButton("Collapse All")
         val expandCurrent = JButton("Expand Current")
+        val newRootBtn = JButton("New Root")
         expandCurrentBtn = expandCurrent
 
         refresh.addActionListener { viewModel.processIntent(BookmarkIntent.Refresh) }
         collapseAllBtn.addActionListener { collapseAll() }
         expandCurrent.addActionListener { expandToCurrent() }
+        newRootBtn.addActionListener { createRootFile() }
         searchField.addActionListener { startSearch() }
 
         toolbar.add(refresh)
         toolbar.add(collapseAllBtn)
         toolbar.add(expandCurrent)
+        toolbar.add(newRootBtn)
         toolbar.add(JLabel("Query:"))
         toolbar.add(searchField)
 
@@ -407,16 +412,54 @@ class BookmarkPanel(
         }
         val rootNode = state.rootNode
         val isSearchActive = state.searchQuery.isNotBlank()
+        // 虚拟超级根不展示在树中，JTree 根设为不可见容器
         val newRootNode = when {
             rootNode != null && isSearchActive -> buildSearchTree(state)
-            rootNode != null -> buildTreeNodeLazy(
-                rootNode,
-                state.referenceCounts,
-                state.referenceTargets,
-                false,
-                "Root",
-                state.expandedNodeIds
-            )
+            rootNode != null -> {
+                val invisibleRoot = DefaultMutableTreeNode("hidden-root")
+                val fileRoots = if (rootNode is BookmarkNode.Group && rootNode.uuid == BookmarkStore.SUPER_ROOT_UUID) {
+                    rootNode.children
+                } else {
+                    listOf(rootNode)
+                }
+                if (fileRoots.size == 1) {
+                    // 单文件：跳过文件根，直接展示其子节点（和之前单文件行为一致）
+                    val singleRoot = fileRoots.first()
+                    val children = when (singleRoot) {
+                        is BookmarkNode.Group -> singleRoot.children
+                        is BookmarkNode.Process -> singleRoot.steps
+                        else -> emptyList()
+                    }
+                    for (child in children) {
+                        invisibleRoot.add(
+                            buildTreeNodeLazy(
+                                child,
+                                state.referenceCounts,
+                                state.referenceTargets,
+                                false,
+                                child.name.ifBlank { "(unnamed)" },
+                                state.expandedNodeIds
+                            )
+                        )
+                    }
+                } else {
+                    // 多文件：各文件根作为顶层行，始终展开
+                    val expandedWithFileRoots = state.expandedNodeIds + fileRoots.map { it.uuid }.toSet()
+                    for (fileRoot in fileRoots) {
+                        invisibleRoot.add(
+                            buildTreeNodeLazy(
+                                fileRoot,
+                                state.referenceCounts,
+                                state.referenceTargets,
+                                false,
+                                fileRoot.name.ifBlank { "(unnamed)" },
+                                expandedWithFileRoots
+                            )
+                        )
+                    }
+                }
+                invisibleRoot
+            }
             else -> DefaultMutableTreeNode("No data")
         }
         val currentRootNode = treeModel.root as? DefaultMutableTreeNode
@@ -446,7 +489,14 @@ class BookmarkPanel(
                 suppressExpandCollapseIntents = false
             }
         } else {
-            restoreExpandedNodes(expandedToRestore)
+            // 多文件时，文件根始终展开
+            val fileRootIds = if (rootNode is BookmarkNode.Group
+                && rootNode.uuid == BookmarkStore.SUPER_ROOT_UUID
+                && rootNode.children.size > 1
+            ) {
+                rootNode.children.map { it.uuid }.toSet()
+            } else emptySet()
+            restoreExpandedNodes(expandedToRestore + fileRootIds)
         }
         (tree.cellRenderer as? BookmarkTreeCellRenderer)?.searchQuery = state.searchQuery
         if (state.searchQuery.isNotBlank() && state.searchResults.isNotEmpty()) {
@@ -510,14 +560,38 @@ class BookmarkPanel(
     }
 
     private fun buildSearchTree(state: BookmarkViewState): DefaultMutableTreeNode {
-        val root = DefaultMutableTreeNode("Search Results")
-        val sourceRoot = currentRoot ?: return root
+        val invisibleRoot = DefaultMutableTreeNode("hidden-root")
+        val sourceRoot = currentRoot ?: return invisibleRoot
         val matchIds = state.searchResults.map { it.uuid }.toSet()
-        val filtered = buildFilteredTree(sourceRoot, matchIds, "Root")
-        if (filtered != null) {
-            return filtered
+        val fileRoots = if (sourceRoot is BookmarkNode.Group && sourceRoot.uuid == BookmarkStore.SUPER_ROOT_UUID) {
+            sourceRoot.children
+        } else {
+            listOf(sourceRoot)
         }
-        return root
+        if (fileRoots.size == 1) {
+            // 单文件：跳过文件根，直接展示其匹配子节点
+            val singleRoot = fileRoots.first()
+            val children = when (singleRoot) {
+                is BookmarkNode.Group -> singleRoot.children
+                is BookmarkNode.Process -> singleRoot.steps
+                else -> emptyList()
+            }
+            for (child in children) {
+                val filtered = buildFilteredTree(child, matchIds, child.name.ifBlank { "(unnamed)" })
+                if (filtered != null) {
+                    invisibleRoot.add(filtered)
+                }
+            }
+        } else {
+            // 多文件：对每个文件根分别构建过滤树
+            for (fileRoot in fileRoots) {
+                val filtered = buildFilteredTree(fileRoot, matchIds, fileRoot.name.ifBlank { "(unnamed)" })
+                if (filtered != null) {
+                    invisibleRoot.add(filtered)
+                }
+            }
+        }
+        return invisibleRoot
     }
 
     private fun buildTreeNodeLazy(
@@ -543,7 +617,7 @@ class BookmarkPanel(
             else -> emptyList()
         }
         if (children.isNotEmpty()) {
-            val shouldExpand = node.uuid == "root" || expandedIds.contains(node.uuid)
+            val shouldExpand = expandedIds.contains(node.uuid)
             if (shouldExpand) {
                 children.forEach { child ->
                     val childPath = "$pathLabel/${child.name.ifBlank { "(unnamed)" }}"
@@ -617,11 +691,11 @@ class BookmarkPanel(
         return paths.mapNotNull { path ->
             val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return@mapNotNull null
             (node.userObject as? NodeView)?.node
-        }.filter { it.uuid != "root" }
+        }.filter { it.uuid != BookmarkStore.SUPER_ROOT_UUID && it.uuid != "root" }
     }
 
     private fun insertionTarget(): Pair<String?, Int?> {
-        val root = treeModel.root as? DefaultMutableTreeNode ?: return "root" to null
+        val root = treeModel.root as? DefaultMutableTreeNode ?: return BookmarkStore.SUPER_ROOT_UUID to null
         val lastSelectedId = SelectionBus.getInstance(project).getLastSelectedNodeId()
         val selectedTreeNode = lastSelectedId?.let { BookmarkTreeUtil.findNodeById(root, it) }
         val selectedView = selectedTreeNode?.userObject as? NodeView
@@ -638,12 +712,12 @@ class BookmarkPanel(
                 val parentId = when (val pNode = parentView?.node) {
                     is BookmarkNode.Group -> pNode.uuid
                     is BookmarkNode.Process -> pNode.uuid
-                    else -> "root"
+                    else -> BookmarkStore.SUPER_ROOT_UUID
                 }
                 val indexInParent = parent?.getIndex(selectedTreeNode)?.takeIf { it >= 0 }
                 parentId to indexInParent?.plus(1)
             }
-            else -> "root" to null
+            else -> BookmarkStore.SUPER_ROOT_UUID to null
         }
     }
 
@@ -981,6 +1055,12 @@ class BookmarkPanel(
         tree.scrollPathToVisible(path)
     }
 
+    private fun createRootFile() {
+        val name = Messages.showInputDialog(project, "Root file name:", "New Root File", null) ?: return
+        if (name.isBlank()) return
+        viewModel.processIntent(BookmarkIntent.CreateRootFile(name))
+    }
+
     private fun createGroup() {
         scope.launch {
             val (parentId, insertIndex) = viewModel.getInsertionTarget(SelectionBus.getInstance(project).getLastSelectedNodeId())
@@ -1075,7 +1155,11 @@ class BookmarkPanel(
 
     private fun editSelected() {
         val node = selectedNode() ?: return
-        if (node.uuid == "root") return
+        if (node.uuid == BookmarkStore.SUPER_ROOT_UUID) return
+        // 禁止编辑文件根节点
+        val superRoot = currentRoot
+        if (superRoot is BookmarkNode.Group && superRoot.uuid == BookmarkStore.SUPER_ROOT_UUID
+            && superRoot.children.any { it.uuid == node.uuid }) return
         // 从最新的 state 中获取节点数据，确保使用最新数据
         val latestNode = currentRoot?.let { findNodeInTree(it, node.uuid) } ?: node
         val updated = when (latestNode) {
@@ -1229,6 +1313,7 @@ class BookmarkPanel(
         val root = currentRoot ?: return
         val containers = collectContainers(root, "Root")
             .filter { it.id != node.uuid }
+            .filter { it.id != BookmarkStore.SUPER_ROOT_UUID }
             .filterNot { isDescendant(node, it.id) }
         if (containers.isEmpty()) return
 
@@ -1740,7 +1825,11 @@ class BookmarkPanel(
 
     private fun deleteSelected() {
         val node = selectedNode() ?: return
-        if (node.uuid == "root") return
+        if (node.uuid == BookmarkStore.SUPER_ROOT_UUID) return
+        // 禁止删除文件根节点
+        val superRoot = currentRoot
+        if (superRoot is BookmarkNode.Group && superRoot.uuid == BookmarkStore.SUPER_ROOT_UUID
+            && superRoot.children.any { it.uuid == node.uuid }) return
         val warning = when (node) {
             is BookmarkNode.Bookmark -> {
                 val outgoing = currentReferenceCounts[node.uuid] ?: 0
@@ -1958,25 +2047,21 @@ class BookmarkPanel(
                 BookmarkHighlighterService.getInstance(project).refreshGutterForFile(effect.filePath)
             }
             is BookmarkSideEffect.RefreshBookmarkxJson -> {
-                // 刷新打开的 codemark.json 文件编辑器
+                // 刷新打开的 .codemark/*.json 文件编辑器
                 val basePath = project.basePath ?: return
-                val bookmarkxPath = BookmarkPersistentDataSource.dataPath(basePath)
-                val normalizedPath = FileUtil.toSystemIndependentName(bookmarkxPath.toString())
-                val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath) ?: return
-                
-                // 使用 WriteIntentReadAction 来刷新文件
-                WriteIntentReadAction.run<Nothing> {
-                    // 如果文件已打开，重新加载文档内容
-                    val fileEditorManager = FileEditorManager.getInstance(project)
-                    if (fileEditorManager.isFileOpen(file)) {
-                        // 刷新 VFS 文件
-                        file.refresh(false, false)
-                        // 重新加载文档
-                        val documentManager = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
-                        val document = documentManager.getDocument(file)
-                        if (document != null) {
-                            // 重新从磁盘加载文件内容到文档
-                            documentManager.reloadFiles(file)
+                val jsonFiles = BookmarkPersistentDataSource.listRootFiles(basePath)
+                for (jsonPath in jsonFiles) {
+                    val normalizedPath = FileUtil.toSystemIndependentName(jsonPath.toString())
+                    val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath) ?: continue
+                    WriteIntentReadAction.run<Nothing> {
+                        val fileEditorManager = FileEditorManager.getInstance(project)
+                        if (fileEditorManager.isFileOpen(file)) {
+                            file.refresh(false, false)
+                            val documentManager = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance()
+                            val document = documentManager.getDocument(file)
+                            if (document != null) {
+                                documentManager.reloadFiles(file)
+                            }
                         }
                     }
                 }
@@ -2141,7 +2226,7 @@ class BookmarkPanel(
 
         override fun createTransferable(c: JComponent): Transferable? {
             val node = selectedNode() ?: return null
-            if (node.uuid == "root") return null
+            if (node.uuid == BookmarkStore.SUPER_ROOT_UUID) return null
             return StringSelection(node.uuid)
         }
 
@@ -2165,6 +2250,7 @@ class BookmarkPanel(
 
             val (parentId, index) = resolveDropTarget(targetNode, target, dropLocation.childIndex)
             if (parentId == null) return false
+            if (parentId == BookmarkStore.SUPER_ROOT_UUID) return false
             if (nodeId == parentId) return false
 
             val root = currentRoot ?: return false

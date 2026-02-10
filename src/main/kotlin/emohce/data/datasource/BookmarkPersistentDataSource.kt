@@ -7,8 +7,7 @@ import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
-import java.nio.file.StandardCopyOption
-import java.time.Instant
+import kotlin.io.path.extension
 
 class BookmarkPersistentDataSource(private val project: Project) {
     private val json = Json {
@@ -20,11 +19,6 @@ class BookmarkPersistentDataSource(private val project: Project) {
     private fun resolvePath(): Path {
         val basePath = project.basePath ?: System.getProperty("user.dir")
         return dataPath(basePath)
-    }
-
-    private fun resolveUndoPath(): Path {
-        val basePath = project.basePath ?: System.getProperty("user.dir")
-        return undoPath(basePath)
     }
 
     fun load(): BookmarkPersistentState? {
@@ -40,28 +34,26 @@ class BookmarkPersistentDataSource(private val project: Project) {
         }
     }
 
-    fun save(state: BookmarkPersistentState, saveUndo: Boolean = true) {
+    fun save(state: BookmarkPersistentState) {
         val path = resolvePath()
-        Files.createDirectories(path.parent)
-        
-        // 保存撤销文件：在保存新状态前，将当前状态保存到撤销文件
-        if (saveUndo && Files.exists(path)) {
-            try {
-                val currentContent = Files.readString(path)
-                val undoPath = resolveUndoPath()
-                Files.writeString(
-                    undoPath,
-                    currentContent,
-                    StandardOpenOption.CREATE,
-                    StandardOpenOption.TRUNCATE_EXISTING,
-                    StandardOpenOption.WRITE
-                )
-            } catch (e: Exception) {
-                // 忽略撤销文件保存失败
-            }
+        saveTo(path, state)
+    }
+
+    /** 从指定路径加载 BookmarkPersistentState */
+    fun loadFrom(path: Path): BookmarkPersistentState? {
+        if (!Files.exists(path)) return null
+        return try {
+            val raw = Files.readString(path)
+            val decoded = json.decodeFromString<BookmarkPersistentState>(raw)
+            migrateStateIfNeeded(decoded, path)
+        } catch (e: Exception) {
+            null
         }
-        
-        // 保存新状态
+    }
+
+    /** 保存 BookmarkPersistentState 到指定路径 */
+    fun saveTo(path: Path, state: BookmarkPersistentState) {
+        Files.createDirectories(path.parent)
         val payload = json.encodeToString(state)
         Files.writeString(
             path,
@@ -70,21 +62,6 @@ class BookmarkPersistentDataSource(private val project: Project) {
             StandardOpenOption.TRUNCATE_EXISTING,
             StandardOpenOption.WRITE
         )
-    }
-
-    fun loadUndo(): BookmarkPersistentState? {
-        val undoPath = resolveUndoPath()
-        if (!Files.exists(undoPath)) return null
-        return try {
-            val raw = Files.readString(undoPath)
-            json.decodeFromString<BookmarkPersistentState>(raw)
-        } catch (e: Exception) {
-            null
-        }
-    }
-
-    fun hasUndo(): Boolean {
-        return Files.exists(resolveUndoPath())
     }
 
     private fun migrateStateIfNeeded(
@@ -98,8 +75,8 @@ class BookmarkPersistentDataSource(private val project: Project) {
                 null
             }
             state.version < current -> {
-                // 迁移版本，直接保存新版本
-                state.copy(version = current).also { save(it) }
+                // 迁移版本，保存到原文件路径
+                state.copy(version = current).also { saveTo(path, it) }
             }
             else -> state
         }
@@ -113,9 +90,28 @@ class BookmarkPersistentDataSource(private val project: Project) {
     companion object {
         const val DATA_DIRECTORY = ".codemark"
         const val DATA_FILE_NAME = "codemark.json"
-        const val UNDO_FILE_NAME = "codemark.json.undo"
 
         fun dataPath(basePath: String): Path = Path.of(basePath, DATA_DIRECTORY, DATA_FILE_NAME)
-        fun undoPath(basePath: String): Path = Path.of(basePath, DATA_DIRECTORY, UNDO_FILE_NAME)
+
+        /** .codemark 目录路径 */
+        fun dataDirPath(basePath: String): Path = Path.of(basePath, DATA_DIRECTORY)
+
+        /** 扫描 .codemark/ 目录下所有 *.json 根文件（排除非数据文件） */
+        fun listRootFiles(basePath: String): List<Path> {
+            val dir = dataDirPath(basePath)
+            if (!Files.exists(dir) || !Files.isDirectory(dir)) return emptyList()
+            return Files.list(dir).use { stream ->
+                stream.filter { it.extension == "json" }
+                    .sorted()
+                    .toList()
+            }
+        }
+
+        /** 创建新的根文件，返回文件路径。文件名规则：去空格、小写、.json 后缀 */
+        fun createRootFilePath(basePath: String, name: String): Path {
+            val sanitized = name.trim().replace("\\s+".toRegex(), "-").lowercase()
+            val fileName = if (sanitized.endsWith(".json")) sanitized else "$sanitized.json"
+            return Path.of(basePath, DATA_DIRECTORY, fileName)
+        }
     }
 }

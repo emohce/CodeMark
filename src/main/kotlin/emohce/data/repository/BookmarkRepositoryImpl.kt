@@ -40,7 +40,7 @@ class BookmarkRepositoryImpl(private val store: BookmarkStore) : BookmarkReposit
     }
 
     override suspend fun getInsertPositionAfterNode(nodeId: String): Pair<String?, Int?>? {
-        if (nodeId == "root") return null
+        if (nodeId == BookmarkStore.SUPER_ROOT_UUID) return null
         val parent = findParentInternal(store.root, nodeId) ?: return null
         val idx = when (parent) {
             is BookmarkNode.Group -> parent.children.indexOfFirst { it.uuid == nodeId }
@@ -63,12 +63,16 @@ class BookmarkRepositoryImpl(private val store: BookmarkStore) : BookmarkReposit
     }
 
     override suspend fun create(node: BookmarkNode, parentId: String?, index: Int?) {
-        logger.info("[REPO_CREATE] Step 1: Creating node - uuid=${node.uuid}, type=${node.javaClass.simpleName}, parentId=$parentId, index=$index")
+        // 如果 parentId 是超级根，重定向到第一个文件根
+        val effectiveParentId = if (parentId == null || parentId == BookmarkStore.SUPER_ROOT_UUID) {
+            store.rootFiles.values.firstOrNull()?.root?.uuid ?: parentId
+        } else parentId
+        logger.info("[REPO_CREATE] Step 1: Creating node - uuid=${node.uuid}, type=${node.javaClass.simpleName}, parentId=$effectiveParentId, index=$index")
         if (node is BookmarkNode.Bookmark) {
             logger.info("[REPO_CREATE] Bookmark details: filePath=${node.filePath}, line=${node.line}, column=${node.column}, name=${node.name}")
         }
         
-        val root = insertChild(store.root, parentId, node, index)
+        val root = insertChild(store.root, effectiveParentId, node, index)
         logger.info("[REPO_CREATE] Step 2: Node inserted into tree, root uuid=${root.uuid}")
         
         store.replaceRoot(root)
@@ -112,9 +116,20 @@ class BookmarkRepositoryImpl(private val store: BookmarkStore) : BookmarkReposit
 
     override suspend fun move(nodeId: String, newParentId: String?, newIndex: Int) {
         val node = findByUuidInternal(store.root, nodeId) ?: return
-        val rootRemoved = removeNode(store.root, nodeId)
-        val rootInserted = insertChild(rootRemoved, newParentId, node, newIndex)
-        store.replaceRoot(rootInserted)
+        // 检查是否跨文件移动（目标是另一个文件的根节点）
+        val targetParentId = newParentId ?: store.root.uuid
+        val sourceEntry = store.findOwnerFile(nodeId)
+        val targetEntry = store.findOwnerFile(targetParentId)
+            ?: store.rootFiles.values.find { it.root.uuid == targetParentId }
+        if (sourceEntry != null && targetEntry != null && sourceEntry !== targetEntry
+            && targetEntry.root.uuid == targetParentId) {
+            // 跨文件移动：目标是另一个文件的根节点
+            store.moveNodeAcrossFiles(nodeId, targetParentId)
+        } else {
+            val rootRemoved = removeNode(store.root, nodeId)
+            val rootInserted = insertChild(rootRemoved, newParentId, node, newIndex)
+            store.replaceRoot(rootInserted)
+        }
         changes.tryEmit(BookmarkEvent.NodeMoved(nodeId, null, newParentId, newIndex))
         notifyObserved(nodeId)
     }

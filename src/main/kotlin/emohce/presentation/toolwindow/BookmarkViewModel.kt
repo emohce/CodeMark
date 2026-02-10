@@ -9,6 +9,7 @@ import com.intellij.openapi.vfs.newvfs.BulkFileListener
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import emohce.core.coroutine.CoroutineDispatchers
 import emohce.data.datasource.BookmarkPersistentDataSource
+import emohce.data.repository.BookmarkStore
 import emohce.domain.event.BookmarkEvent
 import emohce.domain.model.BookmarkNode
 import emohce.domain.model.ProcessProgress
@@ -59,15 +60,15 @@ class BookmarkViewModel(
 
     /** Returns (parentId, insertIndex) from domain model so new node is placed after the selected one. */
     suspend fun getInsertionTarget(lastSelectedNodeId: String?): Pair<String?, Int?> {
-        if (lastSelectedNodeId == null) return "root" to null
+        if (lastSelectedNodeId == null) return BookmarkStore.SUPER_ROOT_UUID to null
         return withContext(dispatchers.io) {
-            val node = bookmarkRepository.findByUuid(lastSelectedNodeId) ?: return@withContext "root" to null
+            val node = bookmarkRepository.findByUuid(lastSelectedNodeId) ?: return@withContext BookmarkStore.SUPER_ROOT_UUID to null
             when (node) {
                 is BookmarkNode.Group -> node.uuid to 0
                 is BookmarkNode.Process -> node.uuid to 0
                 is BookmarkNode.Bookmark, is BookmarkNode.DescriptiveBookmark ->
-                    bookmarkRepository.getInsertPositionAfterNode(lastSelectedNodeId) ?: ("root" to null)
-                else -> "root" to null
+                    bookmarkRepository.getInsertPositionAfterNode(lastSelectedNodeId) ?: (BookmarkStore.SUPER_ROOT_UUID to null)
+                else -> BookmarkStore.SUPER_ROOT_UUID to null
             }
         }
     }
@@ -103,6 +104,7 @@ class BookmarkViewModel(
                 is BookmarkIntent.ClearSearch -> handleClearSearch()
                 is BookmarkIntent.ExpandNode -> handleExpandNode(intent.nodeId)
                 is BookmarkIntent.CollapseNode -> handleCollapseNode(intent.nodeId)
+                is BookmarkIntent.CreateRootFile -> handleCreateRootFile(intent.name)
                 is BookmarkIntent.Refresh -> {
                         logger.info("[PROCESS_INTENT] Handling Refresh")
                         loadBookmarks()
@@ -118,11 +120,11 @@ class BookmarkViewModel(
         scope.launch { reloadBookmarks() }
     }
 
+    /** 从磁盘重新加载所有文件并刷新 UI（用于显式 Refresh 和外部文件变化） */
     private suspend fun reloadBookmarks() {
         logger.info("[RELOAD_BOOKMARKS] Step 1: Starting reload...")
         _state.update { it.copy(isLoading = true, error = null) }
         try {
-            // 如果 repository 支持重新加载，先重新加载数据
             if (bookmarkRepository is emohce.data.repository.BookmarkRepositoryImpl) {
                 logger.info("[RELOAD_BOOKMARKS] Step 2: Reloading store...")
                 withContext(dispatchers.io) {
@@ -130,37 +132,7 @@ class BookmarkViewModel(
                 }
                 logger.info("[RELOAD_BOOKMARKS] Step 3: Store reloaded")
             }
-            
-            logger.info("[RELOAD_BOOKMARKS] Step 4: Getting root node...")
-            val root = withContext(dispatchers.io) {
-                bookmarkRepository.getRootNode()
-            }
-            logger.info("[RELOAD_BOOKMARKS] Step 5: Root node retrieved, uuid=${root.uuid}")
-            
-            logger.info("[RELOAD_BOOKMARKS] Step 6: Getting references...")
-            val references = withContext(dispatchers.io) {
-                referenceRepository.getAllReferences()
-            }
-            logger.info("[RELOAD_BOOKMARKS] Step 7: References retrieved, count=${references.size}")
-            
-            val counts = references.groupingBy { it.sourceId }.eachCount()
-            val targets = references.map { it.targetId }.toSet()
-            val targetsBySource = references.groupBy({ it.sourceId }, { it.targetId })
-            val sourcesByTarget = references.groupBy({ it.targetId }, { it.sourceId })
-            
-            logger.info("[RELOAD_BOOKMARKS] Step 8: Updating state...")
-            _state.update {
-                it.copy(
-                    rootNode = root,
-                    isLoading = false,
-                    referenceCounts = counts,
-                    referenceTargets = targets,
-                    referenceTargetsBySource = targetsBySource,
-                    referenceSourcesByTarget = sourcesByTarget
-                )
-            }
-            // Rebuild index for fast lookup
-            indexService.rebuild(root)
+            refreshStateFromStore()
             logger.info("[RELOAD_BOOKMARKS] Step 9: State updated, reload complete")
         } catch (e: Exception) {
             logger.error("[RELOAD_BOOKMARKS] Error: ${e.message}", e)
@@ -168,12 +140,37 @@ class BookmarkViewModel(
         }
     }
 
+    /** 从内存 store 刷新 UI state（不重新读取磁盘，用于内部操作后的快速刷新） */
+    private suspend fun refreshStateFromStore() {
+        val root = withContext(dispatchers.io) {
+            bookmarkRepository.getRootNode()
+        }
+        val references = withContext(dispatchers.io) {
+            referenceRepository.getAllReferences()
+        }
+        val counts = references.groupingBy { it.sourceId }.eachCount()
+        val targets = references.map { it.targetId }.toSet()
+        val targetsBySource = references.groupBy({ it.sourceId }, { it.targetId })
+        val sourcesByTarget = references.groupBy({ it.targetId }, { it.sourceId })
+        _state.update {
+            it.copy(
+                rootNode = root,
+                isLoading = false,
+                referenceCounts = counts,
+                referenceTargets = targets,
+                referenceTargetsBySource = targetsBySource,
+                referenceSourcesByTarget = sourcesByTarget
+            )
+        }
+        indexService.rebuild(root)
+    }
+
     private fun observeChanges() {
         scope.launch {
             bookmarkRepository.observeChanges().collect { event ->
                 when (event) {
                     is BookmarkEvent.NodeAdded -> {
-                        reloadBookmarks()
+                        refreshStateFromStore()
                         _sideEffects.emit(BookmarkSideEffect.SelectNode(event.node.uuid))
                         val path = when (val node = event.node) {
                             is BookmarkNode.Bookmark -> node.filePath
@@ -186,7 +183,7 @@ class BookmarkViewModel(
                         }
                     }
                     is BookmarkEvent.NodeUpdated -> {
-                        reloadBookmarks()
+                        refreshStateFromStore()
                         // 等待 reloadBookmarks 完成后再选择节点，确保使用最新数据
                         _sideEffects.emit(BookmarkSideEffect.SelectNode(event.node.uuid))
                         // 刷新编辑器 Inlay
@@ -201,7 +198,7 @@ class BookmarkViewModel(
                         }
                     }
                     is BookmarkEvent.NodeLineSynced -> {
-                        reloadBookmarks()
+                        refreshStateFromStore()
                         when (val node = event.node) {
                             is BookmarkNode.Bookmark -> {
                                 refreshInlaysAndGutter(node.filePath)
@@ -217,10 +214,10 @@ class BookmarkViewModel(
                         }
                     }
                     is BookmarkEvent.NodeRemoved -> {
-                        reloadBookmarks()
+                        refreshStateFromStore()
                     }
                     is BookmarkEvent.NodeMoved -> {
-                        reloadBookmarks()
+                        refreshStateFromStore()
                     }
                     is BookmarkEvent.ReferenceSynced -> {
                         // 引用刷新可能影响提示；gutter 由 BookmarkHighlighterService 在 observeChanges 后刷新
@@ -230,10 +227,26 @@ class BookmarkViewModel(
         }
     }
 
+    private suspend fun handleCreateRootFile(name: String) {
+        if (bookmarkRepository is emohce.data.repository.BookmarkRepositoryImpl) {
+            withContext(dispatchers.io) {
+                (bookmarkRepository as emohce.data.repository.BookmarkRepositoryImpl).getStore().createNewRootFile(name)
+            }
+        }
+        refreshStateFromStore()
+        _sideEffects.emit(
+            BookmarkSideEffect.ShowNotification(
+                "Root file '$name' created",
+                com.intellij.notification.NotificationType.INFORMATION
+            )
+        )
+    }
+
     private fun observeFileChanges() {
         val basePath = project.basePath ?: return
-        val bookmarkxPath = BookmarkPersistentDataSource.dataPath(basePath)
-        val normalizedPath = FileUtil.toSystemIndependentName(bookmarkxPath.toString())
+        val codemarkDir = FileUtil.toSystemIndependentName(
+            BookmarkPersistentDataSource.dataDirPath(basePath).toString()
+        )
         
         val messageBus = project.messageBus.connect(scope)
         messageBus.subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
@@ -244,17 +257,23 @@ class BookmarkViewModel(
                     val file = event.file ?: continue
                     val filePath = FileUtil.toSystemIndependentName(file.path)
                     
-                    // 检查是否是 codemark.json 文件变化
-                    if (filePath == normalizedPath) {
+                    // 检查是否是 .codemark/ 目录下的 .json 文件变化
+                    if (filePath.startsWith(codemarkDir) && filePath.endsWith(".json")) {
                         shouldReload = true
                         break
                     }
                 }
                 
                 if (shouldReload) {
-                    // 文件变化后立即刷新，无延迟
+                    // 跳过自身保存触发的文件变化，避免拖拽等操作后树被完整重建导致漂移
+                    if (bookmarkRepository is emohce.data.repository.BookmarkRepositoryImpl) {
+                        val store = (bookmarkRepository as emohce.data.repository.BookmarkRepositoryImpl).getStore()
+                        if (store.isRecentSelfSave()) {
+                            return
+                        }
+                    }
+                    // 外部文件变化后刷新
                     scope.launch {
-                        // 重新加载数据
                         reloadBookmarks()
                         
                         // 刷新所有相关的编辑器 Inlay
@@ -669,6 +688,7 @@ sealed class BookmarkIntent {
     data object ClearSearch : BookmarkIntent()
     data class ExpandNode(val nodeId: String) : BookmarkIntent()
     data class CollapseNode(val nodeId: String) : BookmarkIntent()
+    data class CreateRootFile(val name: String) : BookmarkIntent()
     data object Refresh : BookmarkIntent()
 }
 
