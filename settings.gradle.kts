@@ -1,1 +1,1 @@
-rootProject.name = "CodeMarks"
+rootProject.name = "EzCodeMarks"

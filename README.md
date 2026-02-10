@@ -1,4 +1,4 @@
-# CodeMarks
+# EzCodeMarks
 
 结构化书签与流程导航插件，提供工具窗口、编辑器联动、引用关系与流程步进导航，面向大项目的"代码导览 + 备注"场景。
 
@@ -6,7 +6,7 @@
 
 ## 概览
 
-**CodeMarks** 是一个 IntelliJ IDEA 插件，提供结构化的代码书签管理功能，支持：
+**EzCodeMarks** 是一个 IntelliJ IDEA 插件，提供结构化的代码书签管理功能，支持：
 
 - **树形书签系统**：分组、流程节点、备注的层次化管理
 - **智能导航**：编辑器 gutter 图标、行尾提示、流程步进
@@ -35,7 +35,7 @@
 ```bash
 # 克隆项目
 git clone <repository-url>
-cd CodeMarks
+cd CodeMark
 
 # 运行沙盒环境
 ./gradlew runIde
@@ -57,7 +57,7 @@ cd CodeMarks
 ### 基本操作
 
 #### 编辑器中创建节点
-- **右键菜单**："Add CodeMarks Here"、"Add Group Here"、"Add Process Entry Here"、"Add Note Here"
+- **右键菜单**："Add CodeMark Here"、"Add Group Here"、"Add Process Entry Here"、"Add Note Here"
 - **快捷键**：
   - `Shift+F2` - 添加书签
   - `Shift+F3` - 添加分组
