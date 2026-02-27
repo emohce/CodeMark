@@ -100,8 +100,6 @@ class BookmarkViewModel(
                 is BookmarkIntent.NavigateToNode -> handleNavigateToNode(intent.nodeId)
                 is BookmarkIntent.NavigateToNextInProcess -> handleNavigateNext()
                 is BookmarkIntent.NavigateToPrevInProcess -> handleNavigatePrevious()
-                is BookmarkIntent.Search -> handleSearch(intent.query, intent.filters)
-                is BookmarkIntent.ClearSearch -> handleClearSearch()
                 is BookmarkIntent.ExpandNode -> handleExpandNode(intent.nodeId)
                 is BookmarkIntent.CollapseNode -> handleCollapseNode(intent.nodeId)
                 is BookmarkIntent.CreateRootFile -> handleCreateRootFile(intent.name)
@@ -618,26 +616,6 @@ class BookmarkViewModel(
         }
     }
 
-    private suspend fun handleSearch(query: String, filters: Set<SearchFilter>) {
-        if (query.isBlank()) {
-            _state.update { it.copy(searchQuery = "", searchResults = emptyList()) }
-            return
-        }
-        val results = bookmarkRepository.search(query).filter { node ->
-            when (node) {
-                is BookmarkNode.Bookmark -> filters.contains(SearchFilter.BOOKMARK)
-                is BookmarkNode.Process -> filters.contains(SearchFilter.PROCESS)
-                is BookmarkNode.DescriptiveBookmark -> filters.contains(SearchFilter.NOTE)
-                is BookmarkNode.Group -> filters.contains(SearchFilter.GROUP)
-            }
-        }
-        _state.update { it.copy(searchQuery = query, searchResults = results) }
-    }
-
-    private suspend fun handleClearSearch() {
-        _state.update { it.copy(searchQuery = "", searchResults = emptyList()) }
-    }
-
     private suspend fun handleExpandNode(nodeId: String) {
         _state.update { it.copy(expandedNodeIds = it.expandedNodeIds + nodeId) }
     }
@@ -657,8 +635,6 @@ data class BookmarkViewState(
     val expandedNodeIds: Set<String> = emptySet(),
     val isLoading: Boolean = false,
     val error: String? = null,
-    val searchQuery: String = "",
-    val searchResults: List<BookmarkNode> = emptyList(),
     val processProgress: ProcessProgress? = null,
     val referenceCounts: Map<String, Int> = emptyMap(),
     val referenceTargets: Set<String> = emptySet(),
@@ -684,19 +660,10 @@ sealed class BookmarkIntent {
     data class NavigateToNode(val nodeId: String) : BookmarkIntent()
     data object NavigateToNextInProcess : BookmarkIntent()
     data object NavigateToPrevInProcess : BookmarkIntent()
-    data class Search(val query: String, val filters: Set<SearchFilter>) : BookmarkIntent()
-    data object ClearSearch : BookmarkIntent()
     data class ExpandNode(val nodeId: String) : BookmarkIntent()
     data class CollapseNode(val nodeId: String) : BookmarkIntent()
     data class CreateRootFile(val name: String) : BookmarkIntent()
     data object Refresh : BookmarkIntent()
-}
-
-enum class SearchFilter {
-    BOOKMARK,
-    PROCESS,
-    NOTE,
-    GROUP
 }
 
 sealed class BookmarkSideEffect {
