@@ -18,6 +18,7 @@ import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.TreeSpeedSearch
+import com.intellij.ui.speedSearch.SpeedSearchSupply
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.FormBuilder
 import emohce.core.di.ServiceLocator
@@ -108,9 +109,22 @@ class BookmarkPanel(
                 logger.warn("TreeSelectionListener: no selection path, ignoring (this may happen when selection is cleared)")
                 return@addTreeSelectionListener
             }
-            
+
             logger.info("TreeSelectionListener: selection path exists, processing selection")
-            
+
+            val speed = SpeedSearchSupply.getSupply(tree)
+            val isSpeedSearchTyping = speed?.enteredPrefix?.isNotEmpty() == true
+            if (!isSelectingFromSideEffect && isSpeedSearchTyping) {
+                logger.info("SpeedSearch active -> skip navigation, keep selection/highlight only")
+                val node = selectedNode()
+                SelectionBus.getInstance(project).setCurrentContainerId(currentContainerId())
+                SelectionBus.getInstance(project).setLastSelectedNodeId(node?.uuid)
+                renderer.highlightNodeId = node?.uuid
+                tree.repaint()
+                updateExpandCurrentButtonState()
+                return@addTreeSelectionListener
+            }
+
             // 如果是从 side effect 触发的选择，不执行导航
             if (isSelectingFromSideEffect) {
                 logger.info("Selection is from side effect, skipping navigation")
@@ -125,7 +139,7 @@ class BookmarkPanel(
                 tree.repaint()
                 return@addTreeSelectionListener
             }
-            
+
             val node = selectedNode()
             logger.info("User clicked node: ${node?.uuid}, type=${node?.javaClass?.simpleName}")
             if (node != null) {
@@ -1867,22 +1881,22 @@ class BookmarkPanel(
     private fun navigateToFile(filePath: String, line: Int, column: Int) {
         logger.info("navigateToFile called: filePath=$filePath, line=$line, column=$column")
         val lfs = LocalFileSystem.getInstance()
-        val basePath = project.basePath
-        val candidates = linkedSetOf<String>()
+        val normalized = FileUtil.toSystemIndependentName(filePath)
 
-        // Try both dependent/independent formats, and relative-to-project resolution.
-        val dependent = FileUtil.toSystemDependentName(filePath)
-        val independent = FileUtil.toSystemIndependentName(filePath)
-        candidates.add(dependent)
-        candidates.add(independent)
-        if (basePath != null) {
-            val depFile = java.io.File(dependent)
-            if (!depFile.isAbsolute) {
-                candidates.add(java.io.File(basePath, dependent).canonicalPath)
-            }
-            val indepFile = java.io.File(independent)
-            if (!indepFile.isAbsolute) {
-                candidates.add(FileUtil.toSystemIndependentName(java.io.File(basePath, independent).canonicalPath))
+        val candidates = buildList {
+            val asFile = java.io.File(normalized)
+            if (asFile.isAbsolute) {
+                add(normalized)
+            } else {
+                project.basePath?.let { base ->
+                    try {
+                        val abs = java.io.File(base, normalized).canonicalFile
+                        add(FileUtil.toSystemIndependentName(abs.absolutePath))
+                    } catch (_: Exception) {
+                        // fallback below
+                    }
+                }
+                add(normalized)
             }
         }
 
