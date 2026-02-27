@@ -3,7 +3,7 @@ package emohce.presentation.toolwindow.panel
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.application.WriteIntentReadAction
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.ScrollType
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -1821,7 +1821,7 @@ class BookmarkPanel(
                 for (jsonPath in jsonFiles) {
                     val normalizedPath = FileUtil.toSystemIndependentName(jsonPath.toString())
                     val file = LocalFileSystem.getInstance().refreshAndFindFileByPath(normalizedPath) ?: continue
-                    WriteIntentReadAction.run<Nothing> {
+                    ApplicationManager.getApplication().invokeLater {
                         val fileEditorManager = FileEditorManager.getInstance(project)
                         if (fileEditorManager.isFileOpen(file)) {
                             file.refresh(false, false)
