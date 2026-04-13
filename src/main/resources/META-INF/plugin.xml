@@ -25,12 +25,12 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup
-            id="CodeMarks"
+            id="EzCodeMarks"
             displayType="BALLOON"
             isLogByDefault="true"/>
         <editor.linePainter implementation="emohce.presentation.editor.linepainter.BookmarkLineEndPainter"/>
         <toolWindow
-            id="CodeMarks"
+            id="EzCodeMarks"
             factoryClass="emohce.presentation.toolwindow.CodeMarksToolWindowFactory"
             icon="/META-INF/pluginIcon.png"
             anchor="right"
@@ -39,48 +39,48 @@
     </extensions>
 
     <actions>
-        <action id="CodeMarks.CreateBookmarkAtCaret"
+        <action id="EzCodeMarks.CreateBookmarkAtCaret"
                 class="emohce.presentation.action.CreateBookmarkAtCaretAction"
                 text="Add CodeMark Here"
                 description="Create a codemark at the current caret">
             <keyboard-shortcut keymap="$default" first-keystroke="shift F2"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMarks.CreateProcessAtCaret"
+        <action id="EzCodeMarks.CreateProcessAtCaret"
                 class="emohce.presentation.action.CreateProcessAtCaretAction"
                 text="Add Process Entry Here"
                 description="Create a process with entry at the current caret">
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMarks.CreateGroupAtCaret"
+        <action id="EzCodeMarks.CreateGroupAtCaret"
                 class="emohce.presentation.action.CreateGroupAtCaretAction"
                 text="Add Group Here"
                 description="Create a group under the current selection">
             <keyboard-shortcut keymap="$default" first-keystroke="shift F3"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMarks.CreateNoteAtCaret"
+        <action id="EzCodeMarks.CreateNoteAtCaret"
                 class="emohce.presentation.action.CreateNoteAtCaretAction"
                 text="Add Note Here"
                 description="Create a note under the current selection">
             <keyboard-shortcut keymap="$default" first-keystroke="shift F4"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMarks.NextCodemark"
+        <action id="EzCodeMarks.NextCodemark"
                 class="emohce.presentation.action.NextCodemarkAction"
                 text="Next CodeMark"
                 description="Go to next CodeMark in tree order">
             <keyboard-shortcut keymap="$default" first-keystroke="alt shift DOWN"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMarks.PrevCodemark"
+        <action id="EzCodeMarks.PrevCodemark"
                 class="emohce.presentation.action.PrevCodemarkAction"
                 text="Prev CodeMark"
                 description="Go to previous CodeMark in tree order">
             <keyboard-shortcut keymap="$default" first-keystroke="alt shift UP"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
-        <action id="CodeMarks.DeleteCodeMarkAtCaret"
+        <action id="EzCodeMarks.DeleteCodeMarkAtCaret"
                 class="emohce.presentation.action.DeleteCodeMarkAtCaretAction"
                 text="Delete CodeMark"
                 description="Delete CodeMark at current line">
