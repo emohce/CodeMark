@@ -1,0 +1,52 @@
+version: "1.0"
+name: "VibeAi Scoring Rules"
+updated_at: "2026-05-27"
+
+memory_write_gate:
+  threshold: 7
+  dimensions:
+    - key: reuse_value
+      min: 0
+      max: 2
+      desc: "未来复用概率与频次"
+    - key: execution_value
+      min: 0
+      max: 2
+      desc: "能否直接指导动作并减少错误"
+    - key: evidence_strength
+      min: 0
+      max: 2
+      desc: "是否有命令/文件/链接/结果支撑"
+    - key: stability
+      min: 0
+      max: 2
+      desc: "结论在时间维度上是否稳定"
+    - key: security_compliance
+      min: 0
+      max: 2
+      desc: "是否符合安全与最小权限原则"
+
+task_quality_baseline:
+  first_pass_rate_min: 0.80
+  rollback_rate_max: 0.05
+  extra_clarification_rounds_max: 2
+  high_risk_confirmation_rate: 1.00
+  reusable_insight_per_task_min: 1
+
+tool_call_gate:
+  checks:
+    - necessity
+    - least_privilege
+    - rollbackability
+  required: true
+
+retry_policy:
+  max_retries: 2
+  backoff_seconds: [1, 3]
+  after_second_failure: "switch_path"
+  blocked_state_required: true
+
+rule_change_eval:
+  historical_replay_min_cases: 3
+  prefer_automatic_checks: true
+  ban_subjective_only_judgement: true
