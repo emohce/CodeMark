@@ -75,10 +75,22 @@ class BookmarkPersistentDataSource(private val project: Project) {
                 null
             }
             state.version < current -> {
-                // 迁移版本，保存到原文件路径
-                state.copy(version = current).also { saveTo(path, it) }
+                // 执行版本迁移：v1 (nested root) -> v2 (flat nodes/children/roots)
+                migrateToCurrentVersion(state)
             }
             else -> state
+        }
+    }
+
+    private fun migrateToCurrentVersion(state: BookmarkPersistentState): BookmarkPersistentState {
+        // v1 格式使用 root 字段（嵌套结构），v2 使用 nodes/children/roots（扁平结构）
+        val rootData = state.root
+        return if (rootData != null && state.nodes.isEmpty()) {
+            // 从 v1 格式迁移到 v2
+            BookmarkPersistentState.fromRoot(rootData, state.references)
+        } else {
+            // 已经是 v2 或更高格式，只更新版本号
+            state.copy(version = BookmarkPersistentState.CURRENT_VERSION)
         }
     }
 

@@ -14,7 +14,6 @@ import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.VirtualFile
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
-import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 import emohce.presentation.toolwindow.BookmarkIntent
 import emohce.presentation.toolwindow.BookmarkViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -23,7 +22,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 import javax.swing.SwingUtilities
@@ -221,12 +219,12 @@ class BookmarkDocumentListener(private val project: Project) {
         scope.cancel()
     }
 
-    fun flushForFile(filePath: String) {
+    suspend fun flushForFile(filePath: String) {
         val normalized = FileUtil.toSystemIndependentName(filePath)
         val entry = documentMarkers.entries.firstOrNull { FileUtil.toSystemIndependentName(it.value.filePath) == normalized }
         val document = entry?.key ?: return
         val state = entry.value
-        runBlocking { flushMarkers(document, state) }
+        flushMarkers(document, state)
     }
 
     private inner class DocumentChangeListener(
@@ -256,7 +254,8 @@ class BookmarkDocumentListener(private val project: Project) {
                     }
                 }
 
-                // 防抖写回行号（缩短延迟以减少错位时间窗口)                flushJob?.cancel()
+                // 防抖写回行号（缩短延迟以减少错位时间窗口）
+                flushJob?.cancel()
                 flushJob = scope.launch {
                     delay(30)
                     flushMarkers(document, state)
@@ -288,23 +287,31 @@ class BookmarkDocumentListener(private val project: Project) {
     }
 
     private suspend fun flushMarkers(document: Document, state: FileMarkerState) {
-        withContext(Dispatchers.IO) {
-            state.markers.values.forEach { info ->
-                val marker = info.marker
-                val bookmark = info.bookmark ?: return@forEach
-                if (!marker.isValid) return@forEach
-                val line = document.getLineNumber(marker.startOffset)
-                if (line != info.lastSyncedLine) {
-                    viewModel?.processIntent(BookmarkIntent.UpdateBookmarkLineFromDocument(bookmark.uuid, line))
-                    info.lastSyncedLine = line
+        val updates = withContext(Dispatchers.Main) {
+            ReadAction.compute<List<MarkerLineUpdate>, Throwable> {
+                state.markers.values.mapNotNull { info ->
+                    val marker = info.marker
+                    val bookmark = info.bookmark ?: return@mapNotNull null
+                    if (!marker.isValid) return@mapNotNull null
+                    val line = document.getLineNumber(marker.startOffset)
+                    if (line != info.lastSyncedLine) MarkerLineUpdate(info, bookmark.uuid, line) else null
                 }
             }
         }
-        // flush 完成后立即触发该文件 Gutter 刷新
-        scope.launch {
-            BookmarkHighlighterService.getInstance(project).refreshGutterForFile(state.filePath)
+        updates.forEach { update ->
+            viewModel?.processIntent(BookmarkIntent.UpdateBookmarkLineFromDocument(update.nodeId, update.line))
+            update.info.lastSyncedLine = update.line
         }
+        // Do not refresh gutter here: UpdateBookmarkLineFromDocument is asynchronous.
+        // Refreshing immediately can read stale repository lines and make gutter/line-end hints drift.
+        // BookmarkViewModel/BookmarkHighlighterService refresh after NodeLineSynced when the repository is updated.
     }
+
+    private data class MarkerLineUpdate(
+        val info: MarkerInfo,
+        val nodeId: String,
+        val line: Int
+    )
 
     private data class MarkerInfo(
         var bookmark: BookmarkNode.Bookmark?,

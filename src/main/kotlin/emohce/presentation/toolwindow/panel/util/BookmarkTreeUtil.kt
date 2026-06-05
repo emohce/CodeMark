@@ -4,6 +4,7 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.ui.treeStructure.Tree
 import emohce.domain.model.BookmarkNode
 import emohce.presentation.toolwindow.panel.BookmarkPanel.NodeView
+import javax.swing.JTree
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
@@ -79,7 +80,7 @@ object BookmarkTreeUtil {
      * @return 是否成功选择节点
      */
     fun selectNodeById(tree: Tree, treeModel: DefaultTreeModel, nodeId: String): Boolean {
-        logger.info("[TREE_SELECT] Starting selectNodeById for nodeId=$nodeId")
+        logger.debug("[TREE_SELECT] Starting selectNodeById for nodeId=$nodeId")
         val root = treeModel.root as? DefaultMutableTreeNode
         if (root == null) {
             logger.warn("[TREE_SELECT] Root is null")
@@ -87,23 +88,23 @@ object BookmarkTreeUtil {
         }
         
         val rootView = root.userObject as? NodeView
-        logger.info("[TREE_SELECT] Root nodeId=${rootView?.node?.uuid}, root childCount=${root.childCount}")
+        logger.debug("[TREE_SELECT] Root nodeId=${rootView?.node?.uuid}, root childCount=${root.childCount}")
         
         val node = findNodeById(root, nodeId)
         if (node == null) {
             logger.warn("[TREE_SELECT] Node not found in tree for nodeId=$nodeId")
             // 尝试列出所有节点ID以便调试
-            logger.info("[TREE_SELECT] Listing all node IDs in tree:")
+            logger.debug("[TREE_SELECT] Listing all node IDs in tree:")
             listAllNodeIds(root, 0)
             return false
         }
         
-        logger.info("[TREE_SELECT] Node found, creating TreePath...")
+        logger.debug("[TREE_SELECT] Node found, creating TreePath...")
         val path = TreePath(node.path)
         tree.selectionPath = path
         tree.expandPath(path)
         tree.scrollPathToVisible(path)
-        logger.info("[TREE_SELECT] Node selected successfully")
+        logger.debug("[TREE_SELECT] Node selected successfully")
         return true
     }
     
@@ -111,7 +112,7 @@ object BookmarkTreeUtil {
         val view = node.userObject as? NodeView
         val nodeId = view?.node?.uuid
         val indent = "  ".repeat(depth)
-        logger.info("$indent- nodeId=$nodeId, type=${view?.node?.javaClass?.simpleName}, childCount=${node.childCount}")
+        logger.debug("$indent- nodeId=$nodeId, type=${view?.node?.javaClass?.simpleName}, childCount=${node.childCount}")
         
         val children = node.children()
         while (children.hasMoreElements()) {
@@ -216,6 +217,283 @@ object BookmarkTreeUtil {
      */
     fun createPlaceholderNode(): DefaultMutableTreeNode {
         return DefaultMutableTreeNode(PLACEHOLDER_LABEL)
+    }
+
+    fun pathForDisclosureClick(tree: JTree, x: Int, y: Int): TreePath? {
+        val row = tree.getClosestRowForLocation(x, y)
+        if (row < 0) return null
+        val path = tree.getPathForRow(row) ?: return null
+        val bounds = tree.getPathBounds(path) ?: return null
+        val insideRow = y >= bounds.y && y < bounds.y + bounds.height
+        if (!insideRow) return null
+        return if (x < bounds.x) path else null
+    }
+
+    fun pathForNodeIconClick(tree: JTree, x: Int, y: Int): TreePath? {
+        val path = tree.getPathForLocation(x, y) ?: return null
+        val bounds = tree.getPathBounds(path) ?: return null
+        val iconRight = bounds.x + 24
+        return if (x in bounds.x until iconRight) path else null
+    }
+
+    fun collapseVisibleRows(tree: JTree) {
+        val paths = mutableListOf<TreePath>()
+        for (row in 0 until tree.rowCount) {
+            tree.getPathForRow(row)?.let { path ->
+                if (tree.isExpanded(path)) {
+                    paths.add(path)
+                }
+            }
+        }
+        paths.asReversed().forEach { tree.collapsePath(it) }
+    }
+
+    fun collapseSelectedPath(tree: JTree) {
+        val path = tree.selectionPath ?: return
+        if (tree.isExpanded(path)) {
+            tree.collapsePath(path)
+        }
+        tree.selectionPath = path
+    }
+
+    fun collapseForNavigation(tree: JTree) {
+        val path = tree.selectionPath ?: return
+        val selected = path.lastPathComponent as? DefaultMutableTreeNode ?: return
+        val domainNode = getBookmarkNode(selected) ?: return
+
+        when (domainNode) {
+            is BookmarkNode.Group -> {
+                if (tree.isExpanded(path)) {
+                    collapsePathKeepingSelection(tree, path)
+                } else {
+                    collapseParentGroupContainer(tree, path)
+                }
+            }
+            is BookmarkNode.Process -> {
+                if (tree.isExpanded(path) && hasNavigableChildren(selected)) {
+                    collapsePathKeepingSelection(tree, path)
+                } else {
+                    collapseParentGroupContainer(tree, path)
+                }
+            }
+            is BookmarkNode.Bookmark, is BookmarkNode.DescriptiveBookmark ->
+                collapseParentGroupContainer(tree, path)
+        }
+    }
+
+    /** 先选中目标行再折叠，避免 JTree 在子节点被隐藏时自动改选其它可见行。 */
+    private fun collapsePathKeepingSelection(tree: JTree, path: TreePath) {
+        tree.selectionPath = path
+        if (tree.isExpanded(path)) {
+            tree.collapsePath(path)
+        }
+        tree.selectionPath = path
+    }
+
+    /** 折叠并选中最近的父级 Group/Process 容器（书签、已折叠组）。 */
+    private fun collapseParentGroupContainer(tree: JTree, childPath: TreePath) {
+        val parentPath = domainContainerParentPath(tree, childPath) ?: return
+        tree.selectionPath = parentPath
+        if (tree.isExpanded(parentPath)) {
+            tree.collapsePath(parentPath)
+        }
+        tree.selectionPath = parentPath
+    }
+
+    private fun domainContainerParentPath(tree: JTree, path: TreePath): TreePath? {
+        var current = path.parentPath ?: return null
+        while (true) {
+            val treeNode = current.lastPathComponent as? DefaultMutableTreeNode ?: return null
+            when (getBookmarkNode(treeNode)) {
+                is BookmarkNode.Group, is BookmarkNode.Process -> return current
+                else -> Unit
+            }
+            val parent = current.parentPath ?: return null
+            if (!tree.isRootVisible && parent.parentPath == null) return null
+            current = parent
+        }
+    }
+
+    fun expandSelectedPath(tree: JTree) {
+        val path = tree.selectionPath ?: return
+        if (!tree.isExpanded(path)) {
+            tree.expandPath(path)
+        }
+        tree.selectionPath = path
+    }
+
+    fun expandForNavigation(
+        tree: JTree,
+        populateChildren: (DefaultMutableTreeNode, BookmarkNode) -> Unit
+    ) {
+        val path = tree.selectionPath ?: return
+        val selected = path.lastPathComponent as? DefaultMutableTreeNode ?: return
+        val domainNode = getBookmarkNode(selected)
+        if (domainNode == null) {
+            expandSelectedPath(tree)
+            return
+        }
+        if (!hasNavigableChildren(selected)) return
+        materializeIfNeeded(selected, domainNode, populateChildren)
+        val children = realChildNodes(selected)
+        if (children.isEmpty()) return
+        if (!tree.isExpanded(path)) {
+            tree.expandPath(path)
+        }
+        selectPath(tree, TreePath(children.first().path))
+    }
+
+    fun moveSelectionByVisibleRow(tree: JTree, delta: Int, searchRelevantIds: Set<String>? = null) {
+        if (tree.rowCount <= 0) return
+        val currentRow = resolveCurrentVisibleRow(tree) ?: return
+        val step = if (delta > 0) 1 else -1
+        var row = currentRow + step
+        while (row in 0 until tree.rowCount) {
+            val path = tree.getPathForRow(row) ?: run { row += step; continue }
+            if (isVerticalNavigationRow(tree, path, searchRelevantIds)) {
+                selectPathForVerticalNavigation(tree, path)
+                return
+            }
+            row += step
+        }
+    }
+
+    private fun resolveCurrentVisibleRow(tree: JTree): Int? {
+        tree.selectionPath?.let { tree.getRowForPath(it) }?.takeIf { it >= 0 }?.let { return it }
+        val lead = tree.leadSelectionRow
+        if (lead >= 0) return lead
+        val min = tree.minSelectionRow
+        if (min >= 0) return min
+        return null
+    }
+
+    /**
+     * 垂直导航：沿可见行步进一格；非搜索任意域节点，搜索期仅 [searchRelevantIds]。
+     * 单路径 [moveSelectionByVisibleRow]（与搜索清空后一致），避免 find + fallback 双步进。
+     */
+    fun moveSelectionConsideringLazyLoad(tree: JTree, delta: Int, searchRelevantIds: Set<String>? = null) {
+        if (tree.rowCount <= 0) return
+        if (searchRelevantIds?.isEmpty() == true) return
+        moveSelectionByVisibleRow(tree, delta, searchRelevantIds)
+    }
+
+    /** 垂直导航专用：不调用 [JTree.scrollPathToVisible]（其 [JTree.makeVisible] 会 expandPath 选中节点）。 */
+    fun selectPathForVerticalNavigation(tree: JTree, path: TreePath) {
+        tree.selectionPath = path
+        tree.getPathBounds(path)?.let { tree.scrollRectToVisible(it) }
+    }
+
+    private fun hasNavigableChildren(node: DefaultMutableTreeNode): Boolean {
+        return hasPlaceholder(node) || realChildNodes(node).isNotEmpty()
+    }
+
+    private fun materializeIfNeeded(
+        treeNode: DefaultMutableTreeNode,
+        domainNode: BookmarkNode,
+        populateChildren: (DefaultMutableTreeNode, BookmarkNode) -> Unit
+    ) {
+        if (hasPlaceholder(treeNode)) {
+            populateChildren(treeNode, domainNode)
+        }
+    }
+
+    private fun realChildNodes(node: DefaultMutableTreeNode): List<DefaultMutableTreeNode> {
+        return nodeChildren(node).filter { it.userObject != PLACEHOLDER_LABEL }
+    }
+
+    /**
+     * ↑↓ 可选中域节点；搜索期另要求 nodeId ∈ searchRelevantIds（索引 [visibleNodeIds]：直接匹配、匹配项祖先、匹配子树）。
+     */
+    fun isVerticalNavigationRow(tree: JTree, path: TreePath, searchRelevantIds: Set<String>? = null): Boolean {
+        val treeNode = path.lastPathComponent as? DefaultMutableTreeNode ?: return false
+        val domainNode = getBookmarkNode(treeNode) ?: return false
+        val isDomainRow = domainNode is BookmarkNode.Group ||
+            domainNode is BookmarkNode.Process ||
+            domainNode is BookmarkNode.Bookmark ||
+            domainNode is BookmarkNode.DescriptiveBookmark
+        if (!isDomainRow) return false
+        if (searchRelevantIds == null) return true
+        return domainNode.uuid in searchRelevantIds
+    }
+
+    fun isVerticalNavigationRow(path: TreePath, searchRelevantIds: Set<String>? = null): Boolean {
+        val treeNode = path.lastPathComponent as? DefaultMutableTreeNode ?: return false
+        val domainNode = getBookmarkNode(treeNode) ?: return false
+        val isDomainRow = domainNode is BookmarkNode.Group ||
+            domainNode is BookmarkNode.Process ||
+            domainNode is BookmarkNode.Bookmark ||
+            domainNode is BookmarkNode.DescriptiveBookmark
+        if (!isDomainRow) return false
+        if (searchRelevantIds == null) return true
+        return domainNode.uuid in searchRelevantIds
+    }
+
+    fun moveSelectionDuringSearch(
+        tree: JTree,
+        delta: Int,
+        directMatchIds: Set<String>,
+        selectNodeById: (String) -> Boolean
+    ) {
+        if (directMatchIds.isEmpty()) {
+            moveSelectionByVisibleRow(tree, delta)
+            return
+        }
+        val root = tree.model.root as? DefaultMutableTreeNode ?: return
+        val orderedMatches = collectMatchIdsInPreorder(root, directMatchIds)
+        if (orderedMatches.isEmpty()) return
+        val currentId = tree.selectionPath?.let { nodeIdAt(it) }
+        val currentIndex = currentId?.let { orderedMatches.indexOf(it) } ?: -1
+        val nextIndex = when {
+            currentIndex < 0 && delta > 0 -> 0
+            currentIndex < 0 && delta < 0 -> orderedMatches.lastIndex
+            currentIndex >= 0 -> (currentIndex + delta).coerceIn(0, orderedMatches.lastIndex)
+            else -> return
+        }
+        if (currentIndex == nextIndex && currentIndex >= 0) return
+        selectNodeById(orderedMatches[nextIndex])
+    }
+
+    fun collectMatchIdsInPreorder(root: DefaultMutableTreeNode, matchIds: Set<String>): List<String> {
+        val matches = mutableListOf<String>()
+        collectMatchIdsInPreorderInternal(root, matchIds, matches)
+        return matches
+    }
+
+    private fun collectMatchIdsInPreorderInternal(
+        node: DefaultMutableTreeNode,
+        matchIds: Set<String>,
+        out: MutableList<String>
+    ) {
+        val id = getNodeView(node)?.node?.uuid
+        if (id != null && id in matchIds) {
+            out.add(id)
+        }
+        nodeChildren(node).forEach { collectMatchIdsInPreorderInternal(it, matchIds, out) }
+    }
+
+    private fun selectPath(tree: JTree, path: TreePath) {
+        tree.selectionPath = path
+        tree.scrollPathToVisible(path)
+    }
+
+    private fun nodeIdAt(path: TreePath): String? {
+        val treeNode = path.lastPathComponent as? DefaultMutableTreeNode ?: return null
+        return getNodeView(treeNode)?.node?.uuid
+    }
+
+    fun togglePathExpansion(tree: JTree, path: TreePath) {
+        if (tree.isExpanded(path)) {
+            tree.collapsePath(path)
+        } else {
+            tree.expandPath(path)
+        }
+        tree.selectionPath = path
+    }
+
+    private fun visibleParentPath(tree: JTree, path: TreePath): TreePath? {
+        val parentPath = path.parentPath ?: return null
+        if (tree.isRootVisible) return parentPath
+        return if (parentPath.parentPath == null) null else parentPath
     }
 
     /**

@@ -33,13 +33,13 @@ class BookmarkNavigationListener(private val project: Project) {
     private val attachedListeners = ConcurrentHashMap<Editor, BookmarkCaretListener>() // 必须在 init 之前初始化
     
     init {
-        logger.info("[BOOKMARK_NAV] Initializing BookmarkNavigationListener")
+        logger.debug("[BOOKMARK_NAV] Initializing BookmarkNavigationListener")
         setupEditorListener()
-        logger.info("[BOOKMARK_NAV] BookmarkNavigationListener initialized")
+        logger.debug("[BOOKMARK_NAV] BookmarkNavigationListener initialized")
     }
     
     private fun setupEditorListener() {
-        logger.info("[BOOKMARK_NAV] Setting up editor listeners")
+        logger.debug("[BOOKMARK_NAV] Setting up editor listeners")
         // 监听编辑器选择变化
         val fileEditorManager = FileEditorManager.getInstance(project)
         fileEditorManager.addFileEditorManagerListener(object : com.intellij.openapi.fileEditor.FileEditorManagerListener {
@@ -60,18 +60,18 @@ class BookmarkNavigationListener(private val project: Project) {
         
         // 为已打开的文件附加监听器
         val openFiles = fileEditorManager.openFiles
-        logger.info("[BOOKMARK_NAV] Found ${openFiles.size} open files, attaching listeners")
+        logger.debug("[BOOKMARK_NAV] Found ${openFiles.size} open files, attaching listeners")
         openFiles.forEach { file ->
             attachCaretListener(file)
         }
-        logger.info("[BOOKMARK_NAV] Editor listeners setup completed")
+        logger.debug("[BOOKMARK_NAV] Editor listeners setup completed")
     }
     
     private fun attachCaretListener(file: VirtualFile) {
         val filePath = FileUtil.toSystemIndependentName(file.path)
         val editors = FileEditorManager.getInstance(project).getEditors(file)
         
-        logger.info("[BOOKMARK_NAV] Attaching caret listener to file: $filePath, editors count=${editors.size}")
+        logger.debug("[BOOKMARK_NAV] Attaching caret listener to file: $filePath, editors count=${editors.size}")
         
         editors.forEach { editor ->
             if (editor is com.intellij.openapi.fileEditor.TextEditor) {
@@ -81,7 +81,7 @@ class BookmarkNavigationListener(private val project: Project) {
                     val listener = BookmarkCaretListener(filePath)
                     textEditor.caretModel.addCaretListener(listener)
                     attachedListeners[textEditor] = listener
-                    logger.info("[BOOKMARK_NAV] Caret listener attached to editor for file: $filePath")
+                    logger.debug("[BOOKMARK_NAV] Caret listener attached to editor for file: $filePath")
                 } else {
                     logger.debug("[BOOKMARK_NAV] Caret listener already attached for file: $filePath")
                 }
@@ -98,7 +98,7 @@ class BookmarkNavigationListener(private val project: Project) {
             val line = editor.caretModel.primaryCaret.logicalPosition.line
             val currentTime = System.currentTimeMillis()
             
-            logger.info("[BOOKMARK_NAV] Caret position changed: filePath=$filePath, line=$line, lastLine=$lastLine, timeSinceLastChange=${if (lastLine != null) currentTime - lastChangeTime else -1}ms")
+            logger.debug("[BOOKMARK_NAV] Caret position changed: filePath=$filePath, line=$line, lastLine=$lastLine, timeSinceLastChange=${if (lastLine != null) currentTime - lastChangeTime else -1}ms")
             
             // 检查是否已经处理过这个位置（避免重复触发）
             val cachedLastLine = lastHandledPosition[filePath]
@@ -111,7 +111,7 @@ class BookmarkNavigationListener(private val project: Project) {
             val key = "$filePath:$line"
             val uuid = pendingNavigation.remove(key)
             if (uuid != null) {
-                logger.info("[BOOKMARK_NAV] Handling pending navigation: filePath=$filePath, line=$line, uuid=$uuid")
+                logger.debug("[BOOKMARK_NAV] Handling pending navigation: filePath=$filePath, line=$line, uuid=$uuid")
                 handleBookmarkNavigation(uuid)
                 lastHandledPosition[filePath] = line
                 lastLine = line
@@ -152,7 +152,7 @@ class BookmarkNavigationListener(private val project: Project) {
     private fun handleBookmarkNavigation(uuid: String) {
         scope.launch {
             try {
-                logger.info("[BOOKMARK_NAV] Opening tool window and selecting node: uuid=$uuid")
+                logger.debug("[BOOKMARK_NAV] Opening tool window and selecting node: uuid=$uuid")
                 
                 // 打开工具窗口
                 openToolWindow()
@@ -164,7 +164,7 @@ class BookmarkNavigationListener(private val project: Project) {
                 val locator = ServiceLocator.get(project)
                 locator.bookmarkViewModel.processIntent(BookmarkIntent.SelectNode(uuid))
                 
-                logger.info("[BOOKMARK_NAV] SelectNode intent sent for UUID: $uuid")
+                logger.debug("[BOOKMARK_NAV] SelectNode intent sent for UUID: $uuid")
             } catch (e: Exception) {
                 logger.error("[BOOKMARK_NAV] Error handling bookmark navigation: ${e.message}", e)
             }
@@ -177,13 +177,13 @@ class BookmarkNavigationListener(private val project: Project) {
     private fun checkAndHandleBookmarkNavigation(filePath: String, line: Int) {
         scope.launch {
             try {
-                logger.info("[BOOKMARK_NAV] Checking bookmark for filePath=$filePath, line=$line")
+                logger.debug("[BOOKMARK_NAV] Checking bookmark for filePath=$filePath, line=$line")
                 
                 // 直接通过我们的书签仓库查找
                 val bookmark = findBookmarkByFileAndLine(filePath, line)
                 
                 if (bookmark != null) {
-                    logger.info("[BOOKMARK_NAV] Found bookmark: uuid=${bookmark.uuid}, name=${bookmark.name}")
+                    logger.debug("[BOOKMARK_NAV] Found bookmark: uuid=${bookmark.uuid}, name=${bookmark.name}")
                     handleBookmarkNavigation(bookmark.uuid)
                 } else {
                     logger.debug("[BOOKMARK_NAV] No bookmark found at filePath=$filePath, line=$line")
@@ -210,7 +210,7 @@ class BookmarkNavigationListener(private val project: Project) {
             val toolWindow = toolWindowManager.getToolWindow("CodeMark")
             if (toolWindow != null) {
                 toolWindow.show {
-                    logger.info("[BOOKMARK_NAV] Tool window opened")
+                    logger.debug("[BOOKMARK_NAV] Tool window opened")
                 }
             } else {
                 logger.warn("[BOOKMARK_NAV] Tool window not found")

@@ -4,6 +4,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.ui.Messages
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
@@ -25,14 +26,16 @@ class CreateNoteAtCaretAction : AnAction() {
         )
 
         val parentId = SelectionBus.getInstance(project).getCurrentContainerId()
-        runBlocking {
-            val locator = ServiceLocator.get(project)
-            locator.bookmarkRepository.create(note, parentId)
+        ApplicationManager.getApplication().executeOnPooledThread {
+            runBlocking {
+                val locator = ServiceLocator.get(project)
+                locator.bookmarkRepository.create(note, parentId)
+            }
         }
 
         SelectionBus.getInstance(project).requestSelect(note.uuid)
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("CodeMark")
+            .getNotificationGroup("EzCodeMarks")
             .createNotification("Note created", NotificationType.INFORMATION)
             .notify(project)
     }

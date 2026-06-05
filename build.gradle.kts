@@ -1,12 +1,16 @@
+import org.jetbrains.intellij.platform.gradle.Constants.Tasks
+import org.jetbrains.intellij.platform.gradle.tasks.PrepareSandboxTask
+import org.jetbrains.intellij.platform.gradle.tasks.RunIdeTask
+
 plugins {
     id("java")
-    id("org.jetbrains.kotlin.jvm") version "2.1.20"
-    id("org.jetbrains.kotlin.plugin.serialization") version "2.1.20"
-    id("org.jetbrains.intellij.platform") version "2.10.2"
+    id("org.jetbrains.kotlin.jvm") version "2.4.0"
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.4.0"
+    id("org.jetbrains.intellij.platform") version "2.16.0"
 }
 
 group = "emohce"
-version = "0.0.1"
+version = "0.0.2"
 
 repositories {
     mavenCentral()
@@ -37,6 +41,8 @@ dependencies {
 }
 
 intellijPlatform {
+    autoReload = false
+
     pluginConfiguration {
         ideaVersion {
             sinceBuild = "253"
@@ -55,24 +61,95 @@ tasks {
         targetCompatibility = "21"
     }
 
+    withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+        }
+    }
+
     withType<Test> {
         useJUnitPlatform()
     }
 
-    // Disable buildSearchableOptions task (not required for MVP)
-    // This task generates searchable options but can fail in some environments
-    // For MVP, we can skip it to avoid build failures
     named("buildSearchableOptions") {
         enabled = false
     }
 
-    // Suppress "No remote API found" errors from bundled Kubernetes plugin when running IDE
-    named<org.gradle.api.tasks.JavaExec>("runIde") {
+    named<PrepareSandboxTask>(Tasks.PREPARE_SANDBOX) {
+        disabledPlugins.addAll(
+            "AngularJS",
+            "JBoss",
+            "JSIntentionPowerPack",
+            "JavaScript",
+            "Karma",
+            "NodeJS",
+            "Refactor-X",
+            "Tomcat",
+            "com.deadlock.scsyntax",
+            "com.intellij.LineProfiler",
+            "com.intellij.aop",
+            "com.intellij.beanValidation",
+            "com.intellij.cdi",
+            "com.intellij.cron",
+            "com.intellij.css",
+            "com.intellij.flyway",
+            "com.intellij.freemarker",
+            "com.intellij.hibernate",
+            "com.intellij.javaee.app.servers.integration",
+            "com.intellij.javaee.extensions",
+            "com.intellij.javaee.jakarta.data",
+            "com.intellij.javaee.jpa",
+            "com.intellij.javaee.reverseEngineering",
+            "com.intellij.javaee.web",
+            "com.intellij.jsp",
+            "com.intellij.kubernetes",
+            "com.intellij.liquibase",
+            "com.intellij.micronaut",
+            "com.intellij.persistence",
+            "com.intellij.plugins.webcomponents",
+            "com.intellij.quarkus",
+            "com.intellij.react",
+            "com.intellij.spring.boot",
+            "com.intellij.spring.cloud",
+            "com.intellij.spring.data",
+            "com.intellij.spring.integration",
+            "com.intellij.spring.messaging",
+            "com.intellij.spring.modulith",
+            "com.intellij.spring.mvc",
+            "com.intellij.spring.security",
+            "com.intellij.stylelint",
+            "com.intellij.tailwindcss",
+            "com.intellij.tasks.timeTracking",
+            "com.intellij.velocity",
+            "com.jetbrains.plugins.webDeployment",
+            "com.jetbrains.restWebServices",
+            "org.jetbrains.plugins.docker.gateway",
+            "org.jetbrains.plugins.javaFX",
+            "org.jetbrains.plugins.less",
+            "org.jetbrains.plugins.node-remote-interpreter",
+            "org.jetbrains.plugins.sass",
+            "org.jetbrains.plugins.vue",
+            "com.jetbrains.gateway",
+            "com.jetbrains.remoteDevServer",
+            "intellij.indexing.shared",
+            "intellij.nextjs",
+            "intellij.prettierJS",
+            "intellij.vitejs",
+            "intellij.webpack",
+            "org.intellij.plugins.postcss",
+            "org.jetbrains.plugins.remote-run",
+            "tslint",
+        )
+    }
+
+    named<RunIdeTask>("runIde") {
+        coroutinesJavaAgentFile.set(layout.projectDirectory.file(".intellijPlatform/disabled-coroutines-javaagent.jar"))
         systemProperties["idea.suppress.frequent.exception.logging"] = "true"
+        systemProperties["kotlinx.coroutines.debug"] = "off"
         jvmArgumentProviders.add(org.gradle.process.CommandLineArgumentProvider {
             listOf(
                 "-Didea.suppress.frequent.exception.logging=true",
-                "-Didea.kubernetes.enabled=false"
+                "-Dkotlinx.coroutines.debug=off"
             )
         })
     }
@@ -82,4 +159,5 @@ kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
     }
+    jvmToolchain(21)
 }

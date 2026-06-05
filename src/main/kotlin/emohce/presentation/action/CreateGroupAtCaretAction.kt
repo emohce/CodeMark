@@ -4,6 +4,7 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.ui.Messages
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
@@ -18,14 +19,16 @@ class CreateGroupAtCaretAction : AnAction() {
 
         val group = BookmarkNode.Group(name = name.trim())
         val parentId = SelectionBus.getInstance(project).getCurrentContainerId()
-        runBlocking {
-            val locator = ServiceLocator.get(project)
-            locator.bookmarkRepository.create(group, parentId)
+        ApplicationManager.getApplication().executeOnPooledThread {
+            runBlocking {
+                val locator = ServiceLocator.get(project)
+                locator.bookmarkRepository.create(group, parentId)
+            }
         }
 
         SelectionBus.getInstance(project).requestSelect(group.uuid)
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("CodeMark")
+            .getNotificationGroup("EzCodeMarks")
             .createNotification("Group created", NotificationType.INFORMATION)
             .notify(project)
     }

@@ -5,6 +5,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.util.io.FileUtil
 import emohce.data.datasource.BookmarkPersistentDataSource
+import emohce.data.datasource.BookmarkTreeUiDataSource
+import emohce.data.persistence.BookmarkTreeUiState
 import emohce.data.mapper.BookmarkMapper
 import emohce.data.persistence.BookmarkPersistentState
 import emohce.data.persistence.NodeData
@@ -23,18 +25,49 @@ data class RootFileEntry(
 class BookmarkStore(private val project: Project) {
     private val logger = Logger.getInstance(BookmarkStore::class.java)
     private val dataSource = BookmarkPersistentDataSource(project)
+    private val treeUiDataSource = BookmarkTreeUiDataSource(project)
+
+    @Volatile
+    private var persistedExpandedNodeIds: Set<String> = emptySet()
+
+    init {
+        loadTreeUiStateFromDisk()
+    }
 
     /** 自身保存操作的时间戳，用于 VFS 监听器跳过自触发的文件变化 */
     @Volatile
     private var lastSaveTimestamp: Long = 0L
 
-    /** 判断是否是自身刚刚触发的保存（500ms 窗口内） */
+    @Volatile
+    var revision: Long = 0L
+        private set
+
+    @Volatile
+    private var skipNextVfsReload: Boolean = false
+
+    /** 判断是否是自身刚刚触发的保存（含拖拽落盘后的 VFS 回调，窗口略宽） */
     fun isRecentSelfSave(): Boolean {
-        return System.currentTimeMillis() - lastSaveTimestamp < 500L
+        return System.currentTimeMillis() - lastSaveTimestamp < 2000L
+    }
+
+    fun markSelfMutationPendingVfsSkip() {
+        skipNextVfsReload = true
+        lastSaveTimestamp = System.currentTimeMillis()
+    }
+
+    fun consumeSkipVfsReload(): Boolean {
+        if (skipNextVfsReload) {
+            skipNextVfsReload = false
+            return true
+        }
+        return isRecentSelfSave()
     }
 
     /** 按文件路径索引的所有根文件 */
     val rootFiles: MutableMap<String, RootFileEntry> = linkedMapOf()
+    private val nodeById: MutableMap<String, BookmarkNode> = linkedMapOf()
+    private val parentById: MutableMap<String, String?> = linkedMapOf()
+    private val ownerFileByNodeId: MutableMap<String, RootFileEntry> = linkedMapOf()
     
     /**
      * 将绝对路径转换为相对于项目根目录的相对路径
@@ -188,13 +221,38 @@ class BookmarkStore(private val project: Project) {
         } else {
             for (filePath in files) {
                 val state = dataSource.loadFrom(filePath) ?: continue
-                val fileRoot = fromDataWithAbsolutePaths(state.root) as BookmarkNode.Group
+                val rootData = state.rootData() ?: continue
+                val fileRoot = fromDataWithAbsolutePaths(rootData) as BookmarkNode.Group
                 val fileRefs = state.references.map { BookmarkMapper.fromReferenceData(it) }.toMutableList()
-                rootFiles[filePath.toString()] = RootFileEntry(filePath, fileRoot, fileRefs)
+                val entry = RootFileEntry(filePath, fileRoot, fileRefs)
+                rootFiles[filePath.toString()] = entry
                 references.addAll(fileRefs)
+                if (state.version < BookmarkPersistentState.CURRENT_VERSION) {
+                    saveFileEntry(entry)
+                }
             }
         }
         rebuildSuperRoot()
+        bumpRevision()
+        loadTreeUiStateFromDisk()
+    }
+
+    fun getValidExpandedNodeIds(): Set<String> =
+        persistedExpandedNodeIds.filter { nodeById.containsKey(it) }.toSet()
+
+    fun saveExpandedNodeIds(ids: Set<String>) {
+        persistedExpandedNodeIds = ids
+        persistTreeUiStateToDisk()
+    }
+
+    private fun loadTreeUiStateFromDisk() {
+        persistedExpandedNodeIds = treeUiDataSource.load()?.expandedNodeIds?.toSet() ?: emptySet()
+    }
+
+    private fun persistTreeUiStateToDisk() {
+        treeUiDataSource.save(
+            BookmarkTreeUiState(expandedNodeIds = persistedExpandedNodeIds.toList())
+        )
     }
 
     /** 重建虚拟超级根：将所有文件根作为 children */
@@ -205,16 +263,40 @@ class BookmarkStore(private val project: Project) {
             name = ROOT_NODE_NAME,
             children = children
         )
+        rebuildRuntimeIndexes()
+    }
+
+    private fun rebuildRuntimeIndexes() {
+        nodeById.clear()
+        parentById.clear()
+        ownerFileByNodeId.clear()
+        rootFiles.values.forEach { entry ->
+            indexNode(entry.root, null, entry)
+        }
+        nodeById[root.uuid] = root
+        parentById[root.uuid] = null
+    }
+
+    private fun indexNode(node: BookmarkNode, parentId: String?, owner: RootFileEntry) {
+        nodeById[node.uuid] = node
+        parentById[node.uuid] = parentId
+        ownerFileByNodeId[node.uuid] = owner
+        when (node) {
+            is BookmarkNode.Group -> node.children.forEach { indexNode(it, node.uuid, owner) }
+            is BookmarkNode.Process -> node.steps.forEach { indexNode(it, node.uuid, owner) }
+            else -> Unit
+        }
     }
 
     /** 保存单个文件条目 */
     private fun saveFileEntry(entry: RootFileEntry) {
-        val state = BookmarkPersistentState(
-            version = BookmarkPersistentState.CURRENT_VERSION,
-            root = toDataWithRelativePaths(entry.root) as NodeData.GroupData,
-            references = entry.references.map { BookmarkMapper.toReferenceData(it) }
+        dataSource.saveTo(
+            entry.filePath,
+            BookmarkPersistentState.fromRoot(
+                toDataWithRelativePaths(entry.root) as NodeData.GroupData,
+                entry.references.map { BookmarkMapper.toReferenceData(it) }
+            )
         )
-        dataSource.saveTo(entry.filePath, state)
         lastSaveTimestamp = System.currentTimeMillis()
     }
 
@@ -237,21 +319,86 @@ class BookmarkStore(private val project: Project) {
 
     /** 查找节点所属的根文件 */
     fun findOwnerFile(nodeId: String): RootFileEntry? {
-        // 如果是文件根本身
-        for (entry in rootFiles.values) {
-            if (entry.root.uuid == nodeId) return entry
-            if (findNodeInGroup(entry.root, nodeId) != null) return entry
-        }
-        return null
+        return ownerFileByNodeId[nodeId]
     }
 
-    private fun findNodeInGroup(node: BookmarkNode, targetId: String): BookmarkNode? {
-        if (node.uuid == targetId) return node
-        return when (node) {
-            is BookmarkNode.Group -> node.children.firstNotNullOfOrNull { findNodeInGroup(it, targetId) }
-            is BookmarkNode.Process -> node.steps.firstNotNullOfOrNull { findNodeInGroup(it, targetId) }
-            else -> null
+    fun firstFileRootId(): String? {
+        return rootFiles.values.firstOrNull()?.root?.uuid
+    }
+
+    fun nodeById(nodeId: String): BookmarkNode? {
+        return nodeById[nodeId]
+    }
+
+    fun parentIdOf(nodeId: String): String? {
+        return parentById[nodeId]
+    }
+
+    fun insertNode(parentId: String?, node: BookmarkNode, index: Int?): Boolean {
+        val targetParentId = normalizeParentId(parentId) ?: return false
+        val targetEntry = findEntryForParent(targetParentId) ?: return false
+        stashCurrent()
+        val updatedRoot = replaceChildren(targetEntry.root, targetParentId) { children ->
+            insertAt(children, node, index)
         }
+        if (updatedRoot == targetEntry.root) return false
+        targetEntry.root = updatedRoot
+        persistMutation(setOf(targetEntry))
+        return true
+    }
+
+    fun updateNode(node: BookmarkNode): BookmarkNode? {
+        val entry = findOwnerFile(node.uuid) ?: return null
+        val previous = nodeById[node.uuid] ?: return null
+        stashCurrent()
+        val updatedRoot = replaceNode(entry.root, node) as BookmarkNode.Group
+        if (updatedRoot == entry.root) return previous
+        entry.root = updatedRoot
+        persistMutation(setOf(entry))
+        return previous
+    }
+
+    fun deleteNode(nodeId: String): String? {
+        if (nodeId == SUPER_ROOT_UUID || rootFiles.values.any { it.root.uuid == nodeId }) return null
+        val entry = findOwnerFile(nodeId) ?: return null
+        val removed = nodeById[nodeId] ?: return null
+        val parentId = parentById[nodeId]
+        stashCurrent()
+        val removedIds = collectNodeIds(removed)
+        entry.root = removeNode(entry.root, nodeId)
+        references.removeAll { it.sourceId in removedIds || it.targetId in removedIds }
+        rootFiles.values.forEach { it.references.removeAll { ref -> ref.sourceId in removedIds || ref.targetId in removedIds } }
+        persistMutation(setOf(entry))
+        return parentId
+    }
+
+    fun moveNode(nodeId: String, newParentId: String?, newIndex: Int): Boolean {
+        if (nodeId == SUPER_ROOT_UUID || rootFiles.values.any { it.root.uuid == nodeId }) return false
+        val node = nodeById[nodeId] ?: return false
+        val sourceEntry = findOwnerFile(nodeId) ?: return false
+        val targetParentId = normalizeParentId(newParentId) ?: return false
+        val targetEntry = findEntryForParent(targetParentId) ?: return false
+        if (isDescendant(node, targetParentId)) return false
+        stashCurrent()
+        sourceEntry.root = removeNode(sourceEntry.root, nodeId)
+        targetEntry.root = replaceChildren(targetEntry.root, targetParentId) { children ->
+            insertAt(children, node, newIndex)
+        }
+        persistMutation(setOf(sourceEntry, targetEntry))
+        return true
+    }
+
+    fun reorderChildren(parentId: String, orderedChildIds: List<String>): Boolean {
+        val entry = findEntryForParent(parentId) ?: return false
+        stashCurrent()
+        val updatedRoot = replaceChildren(entry.root, parentId) { children ->
+            val byId = children.associateBy { it.uuid }
+            orderedChildIds.mapNotNull { byId[it] }
+        }
+        if (updatedRoot == entry.root) return false
+        entry.root = updatedRoot
+        persistMutation(setOf(entry))
+        return true
     }
 
     /** 替换虚拟超级根（实际替换对应文件的根） */
@@ -279,20 +426,14 @@ class BookmarkStore(private val project: Project) {
                 entry.root = newRoot
                 saveFileEntry(entry)
             } else {
-                // 尝试查找包含该节点的文件并替换其根
-                for (e in rootFiles.values) {
-                    if (findNodeInGroup(e.root, newRoot.uuid) != null) {
-                        // 这不应该发生，但作为安全回退
-                        logger.warn("replaceRoot called with non-root node uuid=${newRoot.uuid}")
-                        break
-                    }
-                }
+                logger.warn("replaceRoot called with non-root node uuid=${newRoot.uuid}")
             }
         }
         // 重建引用合集
         references.clear()
         rootFiles.values.forEach { references.addAll(it.references) }
         rebuildSuperRoot()
+        bumpRevision()
     }
 
     /** 创建新的根文件 */
@@ -304,41 +445,13 @@ class BookmarkStore(private val project: Project) {
         rootFiles[filePath.toString()] = entry
         saveFileEntry(entry)
         rebuildSuperRoot()
+        bumpRevision()
         return newRoot
     }
 
     /** 跨文件移动节点 */
     fun moveNodeAcrossFiles(nodeId: String, targetFileRootId: String) {
-        val sourceEntry = findOwnerFile(nodeId) ?: return
-        val targetEntry = rootFiles.values.find { it.root.uuid == targetFileRootId } ?: return
-        if (sourceEntry === targetEntry) return
-
-        val node = findNodeInGroup(sourceEntry.root, nodeId) ?: return
-        // 从源文件移除
-        sourceEntry.root = removeNodeFromGroup(sourceEntry.root, nodeId)
-        // 添加到目标文件
-        targetEntry.root = targetEntry.root.copy(
-            children = targetEntry.root.children + node
-        )
-        saveFileEntry(sourceEntry)
-        saveFileEntry(targetEntry)
-        rebuildSuperRoot()
-    }
-
-    private fun removeNodeFromGroup(group: BookmarkNode.Group, nodeId: String): BookmarkNode.Group {
-        return group.copy(
-            children = group.children
-                .filterNot { it.uuid == nodeId }
-                .map { child ->
-                    when (child) {
-                        is BookmarkNode.Group -> removeNodeFromGroup(child, nodeId)
-                        is BookmarkNode.Process -> child.copy(
-                            steps = child.steps.filterNot { it.uuid == nodeId }
-                        )
-                        else -> child
-                    }
-                }
-        )
+        moveNode(nodeId, targetFileRootId, -1)
     }
 
     /** 从内存 stash 恢复上一次操作前的状态 */
@@ -355,10 +468,132 @@ class BookmarkStore(private val project: Project) {
         references.clear()
         rootFiles.values.forEach { references.addAll(it.references) }
         rebuildSuperRoot()
+        bumpRevision()
         return true
     }
 
     fun canUndo(): Boolean = stash != null
+
+    private fun bumpRevision() {
+        revision += 1
+    }
+
+    private fun stashCurrent() {
+        stash = rootFiles.mapValues { (_, entry) ->
+            entry.root.copy() to entry.references.toList()
+        }
+    }
+
+    private fun persistMutation(entries: Set<RootFileEntry>) {
+        markSelfMutationPendingVfsSkip()
+        syncReferencesToFiles()
+        entries.forEach { saveFileEntry(it) }
+        references.clear()
+        rootFiles.values.forEach { references.addAll(it.references) }
+        rebuildSuperRoot()
+        bumpRevision()
+    }
+
+    private fun normalizeParentId(parentId: String?): String? {
+        return if (parentId == null || parentId == SUPER_ROOT_UUID) firstFileRootId() else parentId
+    }
+
+    private fun findEntryForParent(parentId: String): RootFileEntry? {
+        return ownerFileByNodeId[parentId] ?: rootFiles.values.find { it.root.uuid == parentId }
+    }
+
+    private fun replaceNode(current: BookmarkNode, updated: BookmarkNode): BookmarkNode {
+        if (current.uuid == updated.uuid) return updated
+        return when (current) {
+            is BookmarkNode.Group -> current.copy(children = current.children.map { replaceNode(it, updated) })
+            is BookmarkNode.Process -> current.copy(steps = current.steps.map { replaceNode(it, updated) })
+            else -> current
+        }
+    }
+
+    private fun removeNode(current: BookmarkNode, targetId: String): BookmarkNode.Group {
+        return removeNodeInternal(current, targetId) as BookmarkNode.Group
+    }
+
+    private fun removeNodeInternal(current: BookmarkNode, targetId: String): BookmarkNode {
+        return when (current) {
+            is BookmarkNode.Group -> current.copy(
+                children = current.children
+                    .filterNot { it.uuid == targetId }
+                    .map { removeNodeInternal(it, targetId) }
+            )
+            is BookmarkNode.Process -> current.copy(
+                steps = current.steps
+                    .filterNot { it.uuid == targetId }
+                    .map { removeNodeInternal(it, targetId) }
+            )
+            else -> current
+        }
+    }
+
+    private fun replaceChildren(
+        current: BookmarkNode,
+        parentId: String,
+        transform: (List<BookmarkNode>) -> List<BookmarkNode>
+    ): BookmarkNode.Group {
+        return replaceChildrenInternal(current, parentId, transform) as BookmarkNode.Group
+    }
+
+    private fun replaceChildrenInternal(
+        current: BookmarkNode,
+        parentId: String,
+        transform: (List<BookmarkNode>) -> List<BookmarkNode>
+    ): BookmarkNode {
+        return when (current) {
+            is BookmarkNode.Group -> {
+                if (current.uuid == parentId) {
+                    current.copy(children = transform(current.children))
+                } else {
+                    current.copy(children = current.children.map { replaceChildrenInternal(it, parentId, transform) })
+                }
+            }
+            is BookmarkNode.Process -> {
+                if (current.uuid == parentId) {
+                    current.copy(steps = transform(current.steps))
+                } else {
+                    current.copy(steps = current.steps.map { replaceChildrenInternal(it, parentId, transform) })
+                }
+            }
+            else -> current
+        }
+    }
+
+    private fun collectNodeIds(node: BookmarkNode): Set<String> {
+        val ids = linkedSetOf<String>()
+        fun visit(current: BookmarkNode) {
+            ids.add(current.uuid)
+            when (current) {
+                is BookmarkNode.Group -> current.children.forEach(::visit)
+                is BookmarkNode.Process -> current.steps.forEach(::visit)
+                else -> Unit
+            }
+        }
+        visit(node)
+        return ids
+    }
+
+    private fun isDescendant(node: BookmarkNode, targetId: String): Boolean {
+        if (node.uuid == targetId) return true
+        return when (node) {
+            is BookmarkNode.Group -> node.children.any { isDescendant(it, targetId) }
+            is BookmarkNode.Process -> node.steps.any { isDescendant(it, targetId) }
+            else -> false
+        }
+    }
+
+    private fun <T> insertAt(list: List<T>, item: T, index: Int?): List<T> {
+        if (index == null || index < 0 || index >= list.size) {
+            return list + item
+        }
+        val mutable = list.toMutableList()
+        mutable.add(index, item)
+        return mutable.toList()
+    }
     
     companion object {
         const val ROOT_NODE_NAME = "CodeMarks"

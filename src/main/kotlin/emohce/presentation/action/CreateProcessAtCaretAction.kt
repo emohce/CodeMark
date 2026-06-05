@@ -5,6 +5,7 @@ import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.ui.Messages
 import emohce.core.di.ServiceLocator
 import emohce.domain.model.BookmarkNode
@@ -32,14 +33,16 @@ class CreateProcessAtCaretAction : AnAction() {
         )
 
         val parentId = SelectionBus.getInstance(project).getCurrentContainerId()
-        runBlocking {
-            val locator = ServiceLocator.get(project)
-            locator.bookmarkRepository.create(process, parentId)
+        ApplicationManager.getApplication().executeOnPooledThread {
+            runBlocking {
+                val locator = ServiceLocator.get(project)
+                locator.bookmarkRepository.create(process, parentId)
+            }
         }
 
         SelectionBus.getInstance(project).requestSelect(process.uuid)
         NotificationGroupManager.getInstance()
-            .getNotificationGroup("CodeMark")
+            .getNotificationGroup("EzCodeMarks")
             .createNotification("Process created", NotificationType.INFORMATION)
             .notify(project)
     }

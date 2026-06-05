@@ -81,7 +81,7 @@ class IntelliJBookmarkManager(private val project: Project) {
             // 添加到组
             group.add(createdBookmark, BookmarkType.DEFAULT, description)
             
-            logger.info("[INTELLIJ_BOOKMARK] Created bookmark: uuid=${bookmark.uuid}, line=${bookmark.line}, file=${file.path}")
+            logger.debug("[INTELLIJ_BOOKMARK] Created bookmark: uuid=${bookmark.uuid}, line=${bookmark.line}, file=${file.path}")
             return createdBookmark
         } catch (e: Exception) {
             logger.error("[INTELLIJ_BOOKMARK] Error creating bookmark: ${e.message}", e)
@@ -102,7 +102,7 @@ class IntelliJBookmarkManager(private val project: Project) {
             }
             
             // 简化逻辑：直接删除并重新创建，确保位置和描述正确
-            logger.info("[INTELLIJ_BOOKMARK] Updating bookmark: uuid=${bookmark.uuid}, deleting and recreating")
+            logger.debug("[INTELLIJ_BOOKMARK] Updating bookmark: uuid=${bookmark.uuid}, deleting and recreating")
             deleteBookmark(bookmark.uuid)
             createBookmark(bookmark)
         } catch (e: Exception) {
@@ -136,7 +136,7 @@ class IntelliJBookmarkManager(private val project: Project) {
             // 从 manager 中移除
             mgr.remove(bookmark)
             
-            logger.info("[INTELLIJ_BOOKMARK] Deleted bookmark: uuid=$uuid")
+            logger.debug("[INTELLIJ_BOOKMARK] Deleted bookmark: uuid=$uuid")
             return true
         } catch (e: Exception) {
             logger.error("[INTELLIJ_BOOKMARK] Error deleting bookmark: ${e.message}", e)
@@ -176,7 +176,7 @@ class IntelliJBookmarkManager(private val project: Project) {
                 return
             }
             
-            logger.info("[INTELLIJ_BOOKMARK] Syncing ${bookmarks.size} bookmarks")
+            logger.debug("[INTELLIJ_BOOKMARK] Syncing ${bookmarks.size} bookmarks")
             
             // 获取现有的书签 UUID
             val existingUuids = bookmarkGroup.getBookmarks().mapNotNull { bookmark ->
@@ -200,7 +200,7 @@ class IntelliJBookmarkManager(private val project: Project) {
                 }
             }
             
-            logger.info("[INTELLIJ_BOOKMARK] Sync completed")
+            logger.debug("[INTELLIJ_BOOKMARK] Sync completed")
         } catch (e: Exception) {
             logger.error("[INTELLIJ_BOOKMARK] Error syncing bookmarks: ${e.message}", e)
         }

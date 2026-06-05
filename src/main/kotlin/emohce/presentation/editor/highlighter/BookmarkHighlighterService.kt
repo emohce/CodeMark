@@ -49,9 +49,10 @@ class BookmarkHighlighterService(private val project: Project) {
     private val rebuildChannel = Channel<Unit>(Channel.CONFLATED)
 
     fun start() {
+        if (project.isDisposed) return
         if (started) return
         started = true
-        logger.info("[GUTTER_HIGHLIGHT] service start")
+        logger.debug("[GUTTER_HIGHLIGHT] service start")
         startRebuildProcessor()
         listenEditors()
         listenRepository()
@@ -65,19 +66,23 @@ class BookmarkHighlighterService(private val project: Project) {
     }
 
     private fun listenEditors() {
+        if (project.isDisposed) return
         val fem = FileEditorManager.getInstance(project)
         fem.addFileEditorManagerListener(object : FileEditorManagerListener {
             override fun fileOpened(source: FileEditorManager, file: VirtualFile) {
+                if (project.isDisposed) return
                 source.getSelectedTextEditor()?.let { refreshEditor(it, file) }
             }
 
             override fun selectionChanged(event: FileEditorManagerEvent) {
+                if (project.isDisposed) return
                 val editor = event.manager.getSelectedTextEditor() ?: return
                 val file = editor.virtualFile ?: return
                 refreshEditor(editor, file)
             }
 
             override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
+                if (project.isDisposed) return
                 source.getAllEditors(file).forEach { ed ->
                     if (ed is com.intellij.openapi.fileEditor.TextEditor) {
                         clearEditor(ed.editor)
@@ -88,9 +93,11 @@ class BookmarkHighlighterService(private val project: Project) {
     }
 
     private fun listenRepository() {
+        if (project.isDisposed) return
         scope.launch {
             locator.bookmarkRepository.observeChanges().collect { event ->
-                logger.info("[GUTTER_HIGHLIGHT] repo event=${event.javaClass.simpleName}")
+                if (project.isDisposed) return@collect
+                logger.debug("[GUTTER_HIGHLIGHT] repo event=${event.javaClass.simpleName}")
                 when (event) {
                     is BookmarkEvent.NodeLineSynced -> {
                         val path = when (val node = event.node) {
@@ -107,6 +114,7 @@ class BookmarkHighlighterService(private val project: Project) {
     }
 
     private fun refreshOpenEditors() {
+        if (project.isDisposed) return
         val fem = FileEditorManager.getInstance(project)
         val editors = fem.allEditors.filterIsInstance<com.intellij.openapi.fileEditor.TextEditor>()
         editors.forEach { ed ->
@@ -115,6 +123,7 @@ class BookmarkHighlighterService(private val project: Project) {
     }
 
     private fun refreshEditor(editor: Editor, file: VirtualFile) {
+        if (project.isDisposed) return
         if (!indexReady) {
             pendingEditors.offer(editor to file)
             return
@@ -123,9 +132,12 @@ class BookmarkHighlighterService(private val project: Project) {
     }
 
     private fun doRefreshEditor(editor: Editor, file: VirtualFile) {
+        if (project.isDisposed) return
         scope.launch {
+            if (project.isDisposed) return@launch
             val normalized = FileUtil.toSystemIndependentName(file.path)
             val entries = withContext(Dispatchers.IO) { fileIndex.get()[normalized].orEmpty() }
+            if (project.isDisposed) return@launch
             try {
                 applyHighlighters(editor, entries)
                 editor.contentComponent.repaint()
@@ -136,6 +148,7 @@ class BookmarkHighlighterService(private val project: Project) {
     }
 
     private fun processPendingEditors() {
+        if (project.isDisposed) return
         while (true) {
             val pair = pendingEditors.poll() ?: break
             val (editor, file) = pair
@@ -148,9 +161,11 @@ class BookmarkHighlighterService(private val project: Project) {
      * Same visual effect as gutter icon click.
      */
     fun flashLineForFile(filePath: String, line: Int) {
+        if (project.isDisposed) return
         scope.launch {
             val normalized = FileUtil.toSystemIndependentName(filePath)
             withContext(Dispatchers.Main) {
+                if (project.isDisposed) return@withContext
                 val file = LocalFileSystem.getInstance().findFileByPath(normalized) ?: return@withContext
                 val fem = FileEditorManager.getInstance(project)
                 fem.getEditors(file).forEach { editor ->
@@ -167,11 +182,24 @@ class BookmarkHighlighterService(private val project: Project) {
      * Does not depend on full rebuild; reads current root and applies highlighters for open editors of this file.
      */
     fun refreshGutterForFile(path: String) {
+        if (project.isDisposed) return
         scope.launch {
             val normalized = FileUtil.toSystemIndependentName(path)
             val root = withContext(Dispatchers.IO) { locator.bookmarkRepository.getRootNode() }
-            val entries = withContext(Dispatchers.IO) { collectEntriesForPath(root, normalized) }
+            val entries = withContext(Dispatchers.IO) {
+                val index = BookmarkIndexService.getInstance(project)
+                val revision = currentStoreRevision()
+                if (revision >= 0) {
+                    index.rebuildIfStale(root, revision)
+                } else {
+                    index.rebuild(root)
+                }
+                index.entriesForFile(normalized).map { entry ->
+                    MarkerEntry(entry.nodeId, entry.label, entry.line, entry.filePath)
+                }
+            }
             withContext(Dispatchers.Main) {
+                if (project.isDisposed) return@withContext
                 val fem = FileEditorManager.getInstance(project)
                 val file = com.intellij.openapi.vfs.LocalFileSystem.getInstance().refreshAndFindFileByPath(normalized)
                     ?: return@withContext
@@ -211,18 +239,32 @@ class BookmarkHighlighterService(private val project: Project) {
     private fun startRebuildProcessor() {
         scope.launch {
             for (signal in rebuildChannel) {
+                if (project.isDisposed) return@launch
                 delay(50)
+                if (project.isDisposed) return@launch
                 while (rebuildChannel.tryReceive().isSuccess) { /* drain */ }
+                if (project.isDisposed) return@launch
                 rebuildIndexInternal()
             }
         }
     }
 
     private fun requestRebuild() {
+        if (project.isDisposed) return
         rebuildChannel.trySend(Unit)
     }
 
+    private fun currentStoreRevision(): Long {
+        val repository = locator.bookmarkRepository
+        return if (repository is emohce.data.repository.BookmarkRepositoryImpl) {
+            repository.getStore().revision
+        } else {
+            -1L
+        }
+    }
+
     private suspend fun rebuildIndexInternal() {
+        if (project.isDisposed) return
         val (root, map) = withContext(Dispatchers.IO) {
             val built = mutableMapOf<String, MutableList<MarkerEntry>>()
             val rootNode = locator.bookmarkRepository.getRootNode()
@@ -248,17 +290,20 @@ class BookmarkHighlighterService(private val project: Project) {
             built.forEach { (_, v) -> v.sortBy { it.line } }
             rootNode to built
         }
+        if (project.isDisposed) return
         fileIndex.set(map)
-        withContext(Dispatchers.IO) { BookmarkIndexService.getInstance(project).rebuild(root) }
+        withContext(Dispatchers.IO) { BookmarkIndexService.getInstance(project).rebuild(root, currentStoreRevision()) }
         indexReady = true
-        logger.info("[GUTTER_HIGHLIGHT] index rebuilt files=${map.size}")
+        logger.debug("[GUTTER_HIGHLIGHT] index rebuilt files=${map.size}")
         withContext(Dispatchers.Main) {
+            if (project.isDisposed) return@withContext
             processPendingEditors()
             refreshOpenEditors()
         }
     }
 
     private fun applyHighlighters(editor: Editor, entries: List<MarkerEntry>) {
+        if (project.isDisposed) return
         clearEditor(editor)
         if (entries.isEmpty()) return
         val doc = editor.document
@@ -281,8 +326,8 @@ class BookmarkHighlighterService(private val project: Project) {
                 override fun getIcon() = GutterIcons.codemark
                 override fun getClickAction() = object : com.intellij.openapi.actionSystem.AnAction("Select Bookmark") {
                     override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent) {
-                        logger.info("[GUTTER_HIGHLIGHT] click node=${entry.nodeId} line=$line")
-                        toolWindowManager.getToolWindow("CodeMark")?.show(null)
+                        logger.debug("[GUTTER_HIGHLIGHT] click node=${entry.nodeId} line=$line")
+                        toolWindowManager.getToolWindow("EzCodeMarks")?.show(null)
                         CodemarkNavigationHelper.navigateToEntry(project, entry.filePath, line, 0)
                         com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
                             selectionBus.requestSelect(entry.nodeId, entry.filePath, line)
@@ -300,9 +345,11 @@ class BookmarkHighlighterService(private val project: Project) {
                                     locator.globalCodemarkNavigationUseCase.findNext(entry.nodeId)
                                 } ?: return@launch
                                 selectionBus.setLastSelectedNodeId(nextEntry.nodeId)
-                                CodemarkNavigationHelper.navigateToEntry(project, nextEntry.filePath, nextEntry.line, nextEntry.column)
+                                if (nextEntry.hasEditorTarget()) {
+                                    CodemarkNavigationHelper.navigateToEntry(project, nextEntry.filePath!!, nextEntry.line!!, nextEntry.column)
+                                }
                                 viewModel.processIntent(BookmarkIntent.NavigateToNode(nextEntry.nodeId))
-                                toolWindowManager.getToolWindow("CodeMark")?.show(null)
+                                toolWindowManager.getToolWindow("EzCodeMarks")?.show(null)
                             }
                         }
                     })
@@ -314,9 +361,11 @@ class BookmarkHighlighterService(private val project: Project) {
                                     locator.globalCodemarkNavigationUseCase.findPrevious(entry.nodeId)
                                 } ?: return@launch
                                 selectionBus.setLastSelectedNodeId(prevEntry.nodeId)
-                                CodemarkNavigationHelper.navigateToEntry(project, prevEntry.filePath, prevEntry.line, prevEntry.column)
+                                if (prevEntry.hasEditorTarget()) {
+                                    CodemarkNavigationHelper.navigateToEntry(project, prevEntry.filePath!!, prevEntry.line!!, prevEntry.column)
+                                }
                                 viewModel.processIntent(BookmarkIntent.NavigateToNode(prevEntry.nodeId))
-                                toolWindowManager.getToolWindow("CodeMark")?.show(null)
+                                toolWindowManager.getToolWindow("EzCodeMarks")?.show(null)
                             }
                         }
                     })

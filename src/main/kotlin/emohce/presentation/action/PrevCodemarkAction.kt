@@ -2,6 +2,7 @@ package emohce.presentation.action
 
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.application.ApplicationManager
 import emohce.core.di.ServiceLocator
 import emohce.presentation.selection.SelectionBus
 import emohce.presentation.toolwindow.BookmarkIntent
@@ -12,12 +13,18 @@ class PrevCodemarkAction : AnAction() {
         val project = e.project ?: return
         val locator = ServiceLocator.get(project)
         val currentId = SelectionBus.getInstance(project).getLastSelectedNodeId()
-        val entry = runBlocking {
-            locator.globalCodemarkNavigationUseCase.findPrevious(currentId)
-        } ?: return
-        SelectionBus.getInstance(project).setLastSelectedNodeId(entry.nodeId)
-        CodemarkNavigationHelper.navigateToEntry(project, entry.filePath, entry.line, entry.column)
-        locator.bookmarkViewModel.processIntent(BookmarkIntent.NavigateToNode(entry.nodeId))
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val entry = runBlocking {
+                locator.globalCodemarkNavigationUseCase.findPrevious(currentId)
+            } ?: return@executeOnPooledThread
+            ApplicationManager.getApplication().invokeLater {
+                SelectionBus.getInstance(project).setLastSelectedNodeId(entry.nodeId)
+                if (entry.hasEditorTarget()) {
+                    CodemarkNavigationHelper.navigateToEntry(project, entry.filePath!!, entry.line!!, entry.column)
+                }
+                locator.bookmarkViewModel.processIntent(BookmarkIntent.NavigateToNode(entry.nodeId))
+            }
+        }
     }
 
     override fun update(e: AnActionEvent) {

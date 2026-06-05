@@ -9,6 +9,7 @@ import javax.swing.JTree
 
 class BookmarkTreeCellRenderer : ColoredTreeCellRenderer() {
     var highlightNodeId: String? = null
+    var speedSearchHighlightEnabled: Boolean = false
 
     override fun customizeCellRenderer(
         tree: JTree,
@@ -32,8 +33,12 @@ class BookmarkTreeCellRenderer : ColoredTreeCellRenderer() {
             if (suffix.isNotBlank()) {
                 append(" $suffix", SimpleTextAttributes.GRAY_ATTRIBUTES)
             }
+            // Render broken bookmark description
+            if (nodeView.isFileBroken && nodeView.node.description.isNotBlank()) {
+                append(" - ${nodeView.node.description.trim().replace("\n", " ")}", SimpleTextAttributes.GRAY_ATTRIBUTES)
+            }
             toolTipText = nodeView.tooltip
-            SpeedSearchUtil.applySpeedSearchHighlighting(tree, this, true, selected)
+            SpeedSearchUtil.applySpeedSearchHighlighting(tree, this, speedSearchHighlightEnabled, selected)
         } else if (nodeView is String) {
             append(nodeView, SimpleTextAttributes.REGULAR_ATTRIBUTES)
             toolTipText = null

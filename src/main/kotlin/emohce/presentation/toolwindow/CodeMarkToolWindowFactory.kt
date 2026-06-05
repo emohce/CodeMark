@@ -8,7 +8,6 @@ import emohce.core.di.ServiceLocator
 import emohce.presentation.editor.BookmarkDocumentListener
 import emohce.presentation.editor.bookmark.BookmarkNavigationListener
 import emohce.presentation.toolwindow.panel.BookmarkPanel
-import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 
 class CodeMarksToolWindowFactory : ToolWindowFactory {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
@@ -34,8 +33,5 @@ class CodeMarksToolWindowFactory : ToolWindowFactory {
         val panel = BookmarkPanel(project, viewModel)
         val content = ContentFactory.getInstance().createContent(panel, "", false)
         toolWindow.contentManager.addContent(content)
-
-        // 启动自定义 gutter/highlighter 服务，确保左键联动与自渲染生效
-        BookmarkHighlighterService.getInstance(project).start()
     }
 }

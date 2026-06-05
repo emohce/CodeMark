@@ -10,6 +10,7 @@ import com.intellij.openapi.vfs.newvfs.events.VFileEvent
 import emohce.core.coroutine.CoroutineDispatchers
 import emohce.data.datasource.BookmarkPersistentDataSource
 import emohce.data.repository.BookmarkStore
+import emohce.data.repository.BookmarkStoreProvider
 import emohce.domain.event.BookmarkEvent
 import emohce.domain.model.BookmarkNode
 import emohce.domain.model.ProcessProgress
@@ -19,6 +20,7 @@ import emohce.domain.usecase.navigation.ProcessNavigationUseCase
 import emohce.domain.usecase.reference.DetectCircularRefUseCase
 import emohce.domain.usecase.reference.SyncReferencesUseCase
 import emohce.presentation.index.BookmarkIndexService
+import emohce.presentation.toolwindow.panel.BookmarkDomainTree
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
@@ -45,6 +47,7 @@ class BookmarkViewModel(
     val sideEffects: SharedFlow<BookmarkSideEffect> = _sideEffects.asSharedFlow()
 
     private var documentListener: emohce.presentation.editor.BookmarkDocumentListener? = null
+    private var pendingEditAnchorNodeId: String? = null
 
     private val indexService = BookmarkIndexService.getInstance(project)
 
@@ -60,8 +63,15 @@ class BookmarkViewModel(
 
     /** Returns (parentId, insertIndex) from domain model so new node is placed after the selected one. */
     suspend fun getInsertionTarget(lastSelectedNodeId: String?): Pair<String?, Int?> {
-        if (lastSelectedNodeId == null) return BookmarkStore.SUPER_ROOT_UUID to null
         return withContext(dispatchers.io) {
+            pendingEditAnchorNodeId?.let { anchorId ->
+                val anchorTarget = bookmarkRepository.getInsertPositionAfterNode(anchorId)
+                if (anchorTarget != null) {
+                    return@withContext anchorTarget
+                }
+                pendingEditAnchorNodeId = null
+            }
+            if (lastSelectedNodeId == null) return@withContext BookmarkStore.SUPER_ROOT_UUID to null
             val node = bookmarkRepository.findByUuid(lastSelectedNodeId) ?: return@withContext BookmarkStore.SUPER_ROOT_UUID to null
             when (node) {
                 is BookmarkNode.Group -> node.uuid to 0
@@ -73,17 +83,25 @@ class BookmarkViewModel(
         }
     }
 
+    fun markPendingEditAnchor(nodeId: String) {
+        pendingEditAnchorNodeId = nodeId
+    }
+
+    fun clearPendingEditAnchor() {
+        pendingEditAnchorNodeId = null
+    }
+
     fun processIntent(intent: BookmarkIntent) {
-        logger.info("[PROCESS_INTENT] Received intent: ${intent.javaClass.simpleName}")
+        logger.debug("[PROCESS_INTENT] Received intent: ${intent.javaClass.simpleName}")
         scope.launch {
             try {
                 when (intent) {
                     is BookmarkIntent.SelectNode -> {
-                        logger.info("[PROCESS_INTENT] Handling SelectNode: nodeId=${intent.nodeId}")
+                        logger.debug("[PROCESS_INTENT] Handling SelectNode: nodeId=${intent.nodeId}")
                         handleSelectNode(intent.nodeId)
                     }
                     is BookmarkIntent.CreateBookmark -> {
-                        logger.info("[PROCESS_INTENT] Handling CreateBookmark: nodeId=${intent.bookmark.uuid}, filePath=${intent.bookmark.filePath}, line=${intent.bookmark.line}")
+                        logger.debug("[PROCESS_INTENT] Handling CreateBookmark: nodeId=${intent.bookmark.uuid}, filePath=${intent.bookmark.filePath}, line=${intent.bookmark.line}")
                         handleCreateBookmark(intent.parentId, intent.bookmark, intent.insertIndex)
                     }
                 is BookmarkIntent.CreateGroup -> handleCreateGroup(intent.parentId, intent.group, intent.insertIndex)
@@ -101,10 +119,11 @@ class BookmarkViewModel(
                 is BookmarkIntent.NavigateToNextInProcess -> handleNavigateNext()
                 is BookmarkIntent.NavigateToPrevInProcess -> handleNavigatePrevious()
                 is BookmarkIntent.ExpandNode -> handleExpandNode(intent.nodeId)
+                is BookmarkIntent.ExpandNodes -> handleExpandNodes(intent.nodeIds)
                 is BookmarkIntent.CollapseNode -> handleCollapseNode(intent.nodeId)
                 is BookmarkIntent.CreateRootFile -> handleCreateRootFile(intent.name)
                 is BookmarkIntent.Refresh -> {
-                        logger.info("[PROCESS_INTENT] Handling Refresh")
+                        logger.debug("[PROCESS_INTENT] Handling Refresh")
                         loadBookmarks()
                     }
                 }
@@ -120,18 +139,18 @@ class BookmarkViewModel(
 
     /** 从磁盘重新加载所有文件并刷新 UI（用于显式 Refresh 和外部文件变化） */
     private suspend fun reloadBookmarks() {
-        logger.info("[RELOAD_BOOKMARKS] Step 1: Starting reload...")
+        logger.debug("[RELOAD_BOOKMARKS] Step 1: Starting reload...")
         _state.update { it.copy(isLoading = true, error = null) }
         try {
             if (bookmarkRepository is emohce.data.repository.BookmarkRepositoryImpl) {
-                logger.info("[RELOAD_BOOKMARKS] Step 2: Reloading store...")
+                logger.debug("[RELOAD_BOOKMARKS] Step 2: Reloading store...")
                 withContext(dispatchers.io) {
                     (bookmarkRepository as emohce.data.repository.BookmarkRepositoryImpl).getStore().reload()
                 }
-                logger.info("[RELOAD_BOOKMARKS] Step 3: Store reloaded")
+                logger.debug("[RELOAD_BOOKMARKS] Step 3: Store reloaded")
             }
-            refreshStateFromStore()
-            logger.info("[RELOAD_BOOKMARKS] Step 9: State updated, reload complete")
+            refreshStateFromStore(forceRefresh = true)
+            logger.debug("[RELOAD_BOOKMARKS] Step 9: State updated, reload complete")
         } catch (e: Exception) {
             logger.error("[RELOAD_BOOKMARKS] Error: ${e.message}", e)
             _state.update { it.copy(error = e.message, isLoading = false) }
@@ -139,7 +158,10 @@ class BookmarkViewModel(
     }
 
     /** 从内存 store 刷新 UI state（不重新读取磁盘，用于内部操作后的快速刷新） */
-    private suspend fun refreshStateFromStore() {
+    private suspend fun refreshStateFromStore(
+        refreshKind: TreeRefreshKind = TreeRefreshKind.DIFF,
+        forceRefresh: Boolean = false
+    ) {
         val root = withContext(dispatchers.io) {
             bookmarkRepository.getRootNode()
         }
@@ -150,17 +172,35 @@ class BookmarkViewModel(
         val targets = references.map { it.targetId }.toSet()
         val targetsBySource = references.groupBy({ it.sourceId }, { it.targetId })
         val sourcesByTarget = references.groupBy({ it.targetId }, { it.sourceId })
+        indexService.rebuild(root, currentStoreRevision())
+        val kind = if (forceRefresh) TreeRefreshKind.FULL else refreshKind
+        val restoredExpanded = withContext(dispatchers.io) {
+            BookmarkStoreProvider.get(project).getValidExpandedNodeIds()
+        }
         _state.update {
+            val expandedNodeIds = when {
+                forceRefresh -> restoredExpanded
+                it.expandedNodeIds.isEmpty() && restoredExpanded.isNotEmpty() -> restoredExpanded
+                else -> it.expandedNodeIds
+            }
             it.copy(
                 rootNode = root,
+                expandedNodeIds = expandedNodeIds,
                 isLoading = false,
                 referenceCounts = counts,
                 referenceTargets = targets,
                 referenceTargetsBySource = targetsBySource,
-                referenceSourcesByTarget = sourcesByTarget
+                referenceSourcesByTarget = sourcesByTarget,
+                treeRefreshKind = kind,
+                refreshEpoch = if (forceRefresh) it.refreshEpoch + 1 else it.refreshEpoch
             )
         }
-        indexService.rebuild(root)
+    }
+
+    fun ackTreeRefreshKind() {
+        _state.update {
+            if (it.treeRefreshKind == TreeRefreshKind.FULL) it else it.copy(treeRefreshKind = TreeRefreshKind.SKIP)
+        }
     }
 
     private fun observeChanges() {
@@ -196,7 +236,6 @@ class BookmarkViewModel(
                         }
                     }
                     is BookmarkEvent.NodeLineSynced -> {
-                        refreshStateFromStore()
                         when (val node = event.node) {
                             is BookmarkNode.Bookmark -> {
                                 refreshInlaysAndGutter(node.filePath)
@@ -266,7 +305,7 @@ class BookmarkViewModel(
                     // 跳过自身保存触发的文件变化，避免拖拽等操作后树被完整重建导致漂移
                     if (bookmarkRepository is emohce.data.repository.BookmarkRepositoryImpl) {
                         val store = (bookmarkRepository as emohce.data.repository.BookmarkRepositoryImpl).getStore()
-                        if (store.isRecentSelfSave()) {
+                        if (store.consumeSkipVfsReload()) {
                             return
                         }
                     }
@@ -315,52 +354,36 @@ class BookmarkViewModel(
         }
     }
 
+    private fun currentStoreRevision(): Long {
+        return if (bookmarkRepository is emohce.data.repository.BookmarkRepositoryImpl) {
+            (bookmarkRepository as emohce.data.repository.BookmarkRepositoryImpl).getStore().revision
+        } else {
+            -1L
+        }
+    }
+
     private suspend fun handleSelectNode(nodeId: String) {
-        _state.update { it.copy(selectedNodeId = nodeId) }
+        _state.update { it.copy(selectedNodeId = nodeId, treeRefreshKind = TreeRefreshKind.SKIP) }
     }
 
     private suspend fun handleCreateBookmark(parentId: String?, bookmark: BookmarkNode.Bookmark, insertIndex: Int?) {
-        logger.info("=== [CREATE_BOOKMARK_START] ===")
-        logger.info("[CREATE_BOOKMARK] Step 1: Creating bookmark - nodeId=${bookmark.uuid}, filePath=${bookmark.filePath}, line=${bookmark.line}, parentId=$parentId, insertIndex=$insertIndex")
-        
+        logger.debug("=== [CREATE_BOOKMARK_START] ===")
+        logger.debug("[CREATE_BOOKMARK] Step 1: Creating bookmark - nodeId=${bookmark.uuid}, filePath=${bookmark.filePath}, line=${bookmark.line}, parentId=$parentId, insertIndex=$insertIndex")
         bookmarkRepository.create(bookmark, parentId, insertIndex)
-        logger.info("[CREATE_BOOKMARK] Step 2: Bookmark created in repository - nodeId=${bookmark.uuid}")
-        
-        logger.info("[CREATE_BOOKMARK] Step 3: Reloading bookmarks...")
-        reloadBookmarks()
-        logger.info("[CREATE_BOOKMARK] Step 4: Bookmarks reloaded")
-        
-        // Gutter 由 BookmarkHighlighterService 在 repository observeChanges 后刷新
-        logger.info("[CREATE_BOOKMARK] Step 5: SelectNode and RefreshInlays")
-        logger.info("[CREATE_BOOKMARK] Step 6: Emitting SelectNode side effect - nodeId=${bookmark.uuid}")
-        _sideEffects.emit(BookmarkSideEffect.SelectNode(bookmark.uuid))
-        
-        logger.info("[CREATE_BOOKMARK] Step 7: Emitting RefreshInlays side effect - filePath=${bookmark.filePath}")
-        _sideEffects.emit(BookmarkSideEffect.RefreshInlays(bookmark.filePath))
-        
-        logger.info("[CREATE_BOOKMARK] Step 8: Notifying document listener - filePath=${bookmark.filePath}")
-        documentListener?.onBookmarksChanged(bookmark.filePath)
-        
-        logger.info("=== [CREATE_BOOKMARK_END] ===")
+        logger.debug("[CREATE_BOOKMARK] Step 2: Bookmark created; NodeAdded observers will refresh UI/gutter")
+        logger.debug("=== [CREATE_BOOKMARK_END] ===")
     }
 
     private suspend fun handleCreateGroup(parentId: String?, group: BookmarkNode.Group, insertIndex: Int?) {
         bookmarkRepository.create(group, parentId, insertIndex)
-        reloadBookmarks()
-        _sideEffects.emit(BookmarkSideEffect.SelectNode(group.uuid))
     }
 
     private suspend fun handleCreateProcess(parentId: String?, process: BookmarkNode.Process, insertIndex: Int?) {
         bookmarkRepository.create(process, parentId, insertIndex)
-        reloadBookmarks()
-        _sideEffects.emit(BookmarkSideEffect.SelectNode(process.uuid))
-        process.entryFilePath?.let { _sideEffects.emit(BookmarkSideEffect.RefreshInlays(it)) }
     }
 
     private suspend fun handleCreateDescriptive(parentId: String?, note: BookmarkNode.DescriptiveBookmark, insertIndex: Int?) {
         bookmarkRepository.create(note, parentId, insertIndex)
-        reloadBookmarks()
-        _sideEffects.emit(BookmarkSideEffect.SelectNode(note.uuid))
     }
 
     private suspend fun handleEditNode(node: BookmarkNode) {
@@ -411,10 +434,15 @@ class BookmarkViewModel(
     }
 
     private suspend fun handleMoveNode(nodeId: String, newParentId: String?, newIndex: Int) {
+        if (bookmarkRepository.findByUuid(nodeId) == null) {
+            if (pendingEditAnchorNodeId == nodeId) pendingEditAnchorNodeId = null
+            return
+        }
         bookmarkRepository.move(nodeId, newParentId, newIndex)
     }
 
     private suspend fun handleDeleteNode(nodeId: String) {
+        if (pendingEditAnchorNodeId == nodeId) pendingEditAnchorNodeId = null
         val node = bookmarkRepository.findByUuid(nodeId)
         val filePath = when (node) {
             is BookmarkNode.Bookmark -> {
@@ -532,31 +560,34 @@ class BookmarkViewModel(
     }
 
     private suspend fun handleNavigateToBookmark(bookmark: BookmarkNode.Bookmark) {
-        logger.info("handleNavigateToBookmark: bookmark=${bookmark.uuid}, filePath=${bookmark.filePath}, line=${bookmark.line}, column=${bookmark.column}")
-        _state.update { it.copy(selectedNodeId = bookmark.uuid) }
-        logger.info("Emitting NavigateToFile side effect")
+        logger.debug("handleNavigateToBookmark: bookmark=${bookmark.uuid}, filePath=${bookmark.filePath}, line=${bookmark.line}, column=${bookmark.column}")
+        clearPendingEditAnchor()
+        _state.update { it.copy(selectedNodeId = bookmark.uuid, treeRefreshKind = TreeRefreshKind.SKIP) }
+        logger.debug("Emitting NavigateToFile side effect")
         _sideEffects.emit(BookmarkSideEffect.NavigateToFile(bookmark.filePath, bookmark.line, bookmark.column))
-        logger.info("Emitting SelectNode side effect")
+        logger.debug("Emitting SelectNode side effect")
         _sideEffects.emit(BookmarkSideEffect.SelectNode(bookmark.uuid))
-        logger.info("Emitting ScrollToSelected side effect")
+        logger.debug("Emitting ScrollToSelected side effect")
         _sideEffects.emit(BookmarkSideEffect.ScrollToSelected)
 
         val progress = processNavigationUseCase.getProgress(bookmark)
         _state.update { it.copy(processProgress = progress) }
-        logger.info("handleNavigateToBookmark completed")
+        logger.debug("handleNavigateToBookmark completed")
     }
 
     private suspend fun handleNavigateToNode(nodeId: String) {
         val node = bookmarkRepository.findByUuid(nodeId) ?: return
-        _state.update { it.copy(selectedNodeId = nodeId) }
+        _state.update { it.copy(selectedNodeId = nodeId, treeRefreshKind = TreeRefreshKind.SKIP) }
         when (node) {
             is BookmarkNode.Bookmark -> {
+                clearPendingEditAnchor()
                 _sideEffects.emit(BookmarkSideEffect.NavigateToFile(node.filePath, node.line, node.column))
                 val progress = processNavigationUseCase.getProgress(node)
                 _state.update { it.copy(processProgress = progress) }
             }
             is BookmarkNode.Process -> {
                 node.entryFilePath?.let { path ->
+                    clearPendingEditAnchor()
                     val line = node.entryLine ?: 0
                     _sideEffects.emit(BookmarkSideEffect.NavigateToFile(path, line, 0))
                 }
@@ -617,11 +648,45 @@ class BookmarkViewModel(
     }
 
     private suspend fun handleExpandNode(nodeId: String) {
-        _state.update { it.copy(expandedNodeIds = it.expandedNodeIds + nodeId) }
+        val nextIds = _state.value.expandedNodeIds + nodeId
+        _state.update {
+            it.copy(
+                expandedNodeIds = nextIds,
+                treeRefreshKind = TreeRefreshKind.SKIP
+            )
+        }
+        persistExpandedNodeIds(nextIds)
+    }
+
+    private suspend fun handleExpandNodes(nodeIds: Set<String>) {
+        if (nodeIds.isEmpty()) return
+        val root = _state.value.rootNode ?: return
+        val merged = BookmarkDomainTree.expandIdsWithAncestors(root, nodeIds)
+        val nextIds = _state.value.expandedNodeIds + merged
+        _state.update {
+            it.copy(
+                expandedNodeIds = nextIds,
+                treeRefreshKind = TreeRefreshKind.SKIP
+            )
+        }
+        persistExpandedNodeIds(nextIds)
     }
 
     private suspend fun handleCollapseNode(nodeId: String) {
-        _state.update { it.copy(expandedNodeIds = it.expandedNodeIds - nodeId) }
+        val nextIds = _state.value.expandedNodeIds - nodeId
+        _state.update {
+            it.copy(
+                expandedNodeIds = nextIds,
+                treeRefreshKind = TreeRefreshKind.SKIP
+            )
+        }
+        persistExpandedNodeIds(nextIds)
+    }
+
+    private suspend fun persistExpandedNodeIds(ids: Set<String>) {
+        withContext(dispatchers.io) {
+            BookmarkStoreProvider.get(project).saveExpandedNodeIds(ids)
+        }
     }
 
     fun dispose() {
@@ -629,10 +694,22 @@ class BookmarkViewModel(
     }
 }
 
+/** 书签树 UI 刷新粒度：避免每次 state 变化都 setRoot + 全量对齐展开 */
+enum class TreeRefreshKind {
+    /** 不重建模型（仅选中/高亮；或仅同步展开状态） */
+    SKIP,
+    /** 内存数据变更：优先 applyDiff，展开未变时不调用 applyExpandedIdsToTree */
+    DIFF,
+    /** 磁盘重载或 diff 失败兜底：可 setRoot + 全量展开对齐 */
+    FULL
+}
+
 data class BookmarkViewState(
     val rootNode: BookmarkNode.Group? = null,
     val selectedNodeId: String? = null,
     val expandedNodeIds: Set<String> = emptySet(),
+    val treeRefreshKind: TreeRefreshKind = TreeRefreshKind.SKIP,
+    val refreshEpoch: Long = 0L,
     val isLoading: Boolean = false,
     val error: String? = null,
     val processProgress: ProcessProgress? = null,
@@ -661,6 +738,7 @@ sealed class BookmarkIntent {
     data object NavigateToNextInProcess : BookmarkIntent()
     data object NavigateToPrevInProcess : BookmarkIntent()
     data class ExpandNode(val nodeId: String) : BookmarkIntent()
+    data class ExpandNodes(val nodeIds: Set<String>) : BookmarkIntent()
     data class CollapseNode(val nodeId: String) : BookmarkIntent()
     data class CreateRootFile(val name: String) : BookmarkIntent()
     data object Refresh : BookmarkIntent()
