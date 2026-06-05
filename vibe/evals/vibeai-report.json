@@ -1,15 +1,15 @@
 {
   "summary": {
     "rules": "/Users/gdkmjd/work/czz/EzCodeMark/vibe/ai-rules/VibeAi_Scoring_Rules.yaml",
-    "files": 1,
+    "files": 2,
     "avg_first_pass_rate": 1.0,
     "avg_rollback_rate": 0.0,
-    "avg_clarification_rounds": 0.0,
+    "avg_clarification_rounds": 0.5,
     "avg_high_risk_confirmation_rate": 1.0,
     "avg_memory_score": 8.0,
-    "memory_write_hit": 1,
-    "tool_gate_pass": 1,
-    "path_switch_compliance": 1,
+    "memory_write_hit": 2,
+    "tool_gate_pass": 2,
+    "path_switch_compliance": 2,
     "baseline": {
       "first_pass_rate_min": 0.8,
       "rollback_rate_max": 0.05,
@@ -36,6 +36,25 @@
         "gate_rollbackability": true,
         "switched_path_after_second_failure": null,
         "blocked_state": null
+      }
+    },
+    {
+      "file": "/Users/gdkmjd/work/czz/EzCodeMark/vibe/evals/2026-06-05-tree-search-optimization.md",
+      "status": "OK",
+      "issues": [],
+      "metrics": {
+        "first_pass_rate": 1.0,
+        "rollback_rate": 0.0,
+        "clarification_rounds": 1,
+        "high_risk_confirmation_rate": 1.0,
+        "reusable_insights": 1,
+        "memory_total": 8,
+        "memory_write": true,
+        "gate_necessity": true,
+        "gate_least_privilege": true,
+        "gate_rollbackability": true,
+        "switched_path_after_second_failure": null,
+        "blocked_state": false
       }
     }
   ]

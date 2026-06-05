@@ -93,6 +93,26 @@
 
 ---
 
+## 2.2 树搜索快捷键直接进入 Full 模式探索记录（2026-06-05 记录）
+
+### 需求背景
+用户期望在书签树（JTree）上按下 `Ctrl+F`（Mac 上为 `Cmd+F`）触发搜索时，能够**直接、即时**进入 `TreeSearchMode.FULL` 模式并展现搜索框及 "Full" 角标。
+
+### 尝试方案与实现错误（Lessons Learned）
+1. **第一次尝试（试图通过 `showPopup` 唤起）**：
+   - **方案**：在 `toggleSearchModeFromFindShortcut` 的未激活搜索分支，以及首个空白分支中，在调用 `updateSearchModeLabel()` 前调用了 `treeSpeedSearch.showPopup()`。
+   - **现象**：运行时**无效（no use）**。
+   - **错误根因**：
+     - IntelliJ 的 `SpeedSearchBase.showPopup()` 依赖于内部状态中的 search popup 实例（`myPopup`），而该实例仅在有实际输入的非空前缀（`enteredPrefix`）时才会被懒加载创建并渲染。
+     - 在搜索尚未激活且 `enteredPrefix` 为空时直接调用 `showPopup()`，内部的 popup 实例为 `null`，导致该调用在运行时成为空操作（No-op），没有任何视觉和交互反馈。
+     - 直接修改 `shouldShowTreeSearchModeBadge` 以使 pending 状态直接显示角标，会打破单元测试中 `pending search mode does not show mode badge before query input` 的原有设计。
+
+### 后续处理建议
+- 保持目前代码的回滚状态（已回退至 2026-06-04 正常通过所有 61 个单元测试的基线）。
+- 未来若需彻底解决此问题，需重构 SpeedSearch 的唤起机制（例如通过模拟触发第一个字符输入，或使用平台顶层的非 Tree 专有搜索框组件如 `SearchTextField` / 侧边独立搜索栏进行代替，而非直接强行唤起 headless/无前缀的 `TreeSpeedSearch` 弹窗）。
+
+---
+
 ## 3. 验证
 
 - 手工：见主文档 [§10](./260604-cursor-tree-operations-spec.md#10-验收)。

@@ -18,6 +18,7 @@ import com.intellij.openapi.ui.popup.JBPopupListener
 import com.intellij.openapi.ui.popup.LightweightWindowEvent
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.wm.IdeFocusManager
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
@@ -72,6 +73,93 @@ import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
 import javax.swing.tree.TreeSelectionModel
+
+private class AnchoredTreeSpeedSearch(
+    tree: JTree,
+    canExpand: Boolean,
+    nodeText: (TreePath) -> String,
+    private val anchor: () -> JComponent?
+) : TreeSpeedSearch(tree, canExpand, java.util.function.Function { path -> nodeText(path) }) {
+    fun moveToAnchor() {
+        moveSearchPopup()
+    }
+
+    override fun moveSearchPopup() {
+        super.moveSearchPopup()
+        val searchField = textField ?: return
+        val popup = searchField.parent ?: return
+        val layeredPane = popup.parent as? JLayeredPane ?: return
+        val anchorComponent = anchor()?.takeIf { it.isShowing } ?: return
+        searchField.font = searchField.font.deriveFont(Font.PLAIN, 13f)
+        val anchorBounds = SwingUtilities.convertRectangle(
+            anchorComponent.parent,
+            anchorComponent.bounds,
+            layeredPane
+        )
+        val preferredSize = popup.preferredSize.let { size ->
+            Dimension(size.width.coerceAtLeast(JBUI.scale(132)), size.height)
+        }
+        val x = (anchorBounds.x + anchorBounds.width - preferredSize.width)
+            .coerceIn(0, (layeredPane.width - preferredSize.width).coerceAtLeast(0))
+        val y = (anchorBounds.y + anchorBounds.height + JBUI.scale(1))
+            .coerceAtMost((layeredPane.height - preferredSize.height).coerceAtLeast(0))
+        popup.setBounds(x, y, preferredSize.width, preferredSize.height)
+        popup.validate()
+    }
+}
+
+internal enum class TreeSearchMode {
+    FULL,
+    VISIBLE_ONLY
+}
+
+internal fun nextTreeSearchModeOnFind(currentMode: TreeSearchMode, isSearchActive: Boolean): TreeSearchMode {
+    return if (!isSearchActive) {
+        TreeSearchMode.FULL
+    } else if (currentMode == TreeSearchMode.FULL) {
+        TreeSearchMode.VISIBLE_ONLY
+    } else {
+        TreeSearchMode.FULL
+    }
+}
+
+internal fun treeSearchModeBeforeQueryInput(): TreeSearchMode = TreeSearchMode.FULL
+
+internal fun treeSearchModeBadgeText(mode: TreeSearchMode): String {
+    return if (mode == TreeSearchMode.FULL) "Full" else "Visible"
+}
+
+internal fun treeSearchModeAfterExit(): TreeSearchMode = TreeSearchMode.VISIBLE_ONLY
+
+internal fun shouldShowTreeSearchModeBadge(
+    pendingSearchMode: Boolean,
+    hasQuery: Boolean,
+    isPopupActive: Boolean
+): Boolean {
+    return hasQuery || isPopupActive
+}
+
+internal fun resolveTreeSearchModeForPrefix(
+    currentMode: TreeSearchMode,
+    forceNextSearchFull: Boolean
+): TreeSearchMode {
+    return if (forceNextSearchFull) TreeSearchMode.FULL else currentMode
+}
+
+internal fun shouldHandleTreeFindShortcut(
+    hasFocusContext: Boolean,
+    isToolWindowActive: Boolean,
+    hasRecentPanelInteraction: Boolean
+): Boolean {
+    return hasFocusContext || isToolWindowActive || hasRecentPanelInteraction
+}
+
+internal fun treeFindShortcutStrokes(): List<KeyStroke> {
+    return listOf(
+        KeyStroke.getKeyStroke(KeyEvent.VK_F, KeyEvent.CTRL_DOWN_MASK),
+        KeyStroke.getKeyStroke(KeyEvent.VK_F, KeyEvent.META_DOWN_MASK)
+    )
+}
 
 private fun toRelativePath(project: Project, absolutePath: String?): String? {
     if (absolutePath.isNullOrBlank()) return absolutePath
@@ -354,6 +442,31 @@ class BookmarkPanel(
     private var lastBuiltSearchAutoIds: Set<String> = emptySet()
     // 与 ViewModel expandedNodeIds 合并的 UI 展开缓存（Gutter/拖拽等重建前同步当前 JTree 展开，防全量收缩）
     private val gutterPersistExpandIds: MutableSet<String> = linkedSetOf()
+    private var searchMode: TreeSearchMode = TreeSearchMode.VISIBLE_ONLY
+    private var pendingSearchMode: Boolean = false
+    private var forceNextSearchFull: Boolean = false
+    private var speedSearchPrefix: String = ""
+    private var lastPanelInteractionAtMillis: Long = 0L
+    private val searchModeLabel = JLabel().apply {
+        isVisible = false
+        font = font.deriveFont(Font.PLAIN, 11.5f)
+        foreground = JBColor(0x9AA0A6, 0x9AA0A6)
+        background = JBColor(0xF5F7FA, 0x2B2D30)
+        isOpaque = true
+        horizontalAlignment = SwingConstants.CENTER
+        border = JBUI.Borders.compound(
+            JBUI.Borders.customLine(JBColor(0xD8DEE9, 0x3C4043), 1),
+            JBUI.Borders.empty(2, 8)
+        )
+    }
+    private val searchModeArea = JPanel(FlowLayout(FlowLayout.RIGHT, JBUI.scale(6), 0)).apply {
+        isOpaque = false
+        border = JBUI.Borders.empty(4, 0, 4, 8)
+        preferredSize = Dimension(JBUI.scale(148), JBUI.scale(32))
+        minimumSize = preferredSize
+        maximumSize = preferredSize
+        add(searchModeLabel)
+    }
 
     init {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -363,10 +476,10 @@ class BookmarkPanel(
         tree.toggleClickCount = 0
         tree.toolTipText = ""
         tree.cellRenderer = renderer
-        treeSpeedSearch = TreeSpeedSearch.installOn(tree, true) { path ->
+        treeSpeedSearch = AnchoredTreeSpeedSearch(tree, false, { path ->
             val nodeView = (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject as? NodeView
             nodeView?.displayName ?: ""
-        }
+        }) { searchModeArea }
         treeSpeedSearch.addChangeListener(PropertyChangeListener { event ->
             if (event.propertyName == "enteredPrefix") {
                 onSpeedSearchPrefixChanged(event.newValue as? String)
@@ -482,12 +595,14 @@ class BookmarkPanel(
                 expandAllNestedUnderGroup = { expandAllNestedUnderSelectedGroup() },
                 canExpandAllNestedUnderGroup = { selectedNode() is BookmarkNode.Group },
                 selectedNode = { selectedNode() },
-                prepareContextMenu = { event -> prepareTreeContextMenu(event) }
+                prepareContextMenu = { event -> prepareTreeContextMenu(event) },
+                toggleSearchMode = { toggleSearchModeFromFindShortcut() }
             )
         )
         tree.componentPopupMenu = treeActions.createPopupMenu()
         tree.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
+                markPanelInteractionForSearch()
                 logger.debug("Mouse pressed: button=${e.button}, isPopupTrigger=${e.isPopupTrigger}, clickCount=${e.clickCount}")
                 treeActions.onContextMenuMouseEvent(e)
                 if (toggleGroupFromNodeIconClick(e)) {
@@ -509,6 +624,7 @@ class BookmarkPanel(
             }
 
             override fun mouseClicked(e: MouseEvent) {
+                markPanelInteractionForSearch()
                 logger.debug("Mouse clicked: button=${e.button}, clickCount=${e.clickCount}, isSelectingFromSideEffect=$isSelectingFromSideEffect")
                 if (e.isConsumed) {
                     return
@@ -541,10 +657,16 @@ class BookmarkPanel(
         val toolbar = treeActions.createToolbar()
         val topPanel = JPanel(BorderLayout()).apply {
             add(toolbar, BorderLayout.WEST)
+            add(searchModeArea, BorderLayout.EAST)
         }
 
+        val scrollPane = JBScrollPane(tree)
+        installBlankViewportFocus(scrollPane)
+        installFindShortcutBindings(topPanel, scrollPane)
+
         add(topPanel, BorderLayout.NORTH)
-        add(JBScrollPane(tree), BorderLayout.CENTER)
+        add(scrollPane, BorderLayout.CENTER)
+        installFindShortcutBindings(this, scrollPane.viewport)
 
         tree.navigationKeyHandler = { event -> dispatchTreeNavigationKey(event, requireFocusContext = false) }
         treeActions.installShortcuts()
@@ -746,8 +868,14 @@ class BookmarkPanel(
         if (event.id != KeyEvent.KEY_PRESSED) return false
         if (event.isConsumed) return true
         if (isHandlingTreeNavigationKey) return true
+        if (isFindShortcut(event)) {
+            if (requireFocusContext && !isFindShortcutContext(event.component)) return false
+            event.consume()
+            toggleSearchModeFromFindShortcut()
+            return true
+        }
         if (requireFocusContext && !isTreeNavigationFocusContext(event.component)) return false
-        if (event.keyCode == KeyEvent.VK_ESCAPE && isSpeedSearchActive()) {
+        if (event.keyCode == KeyEvent.VK_ESCAPE && isSearchInteractionActive()) {
             event.consume()
             exitSearchMode()
             treeSpeedSearch.hidePopup()
@@ -804,51 +932,131 @@ class BookmarkPanel(
         return event.modifiersEx and mask != 0
     }
 
+    private fun isFindShortcut(event: KeyEvent): Boolean {
+        if (event.id != KeyEvent.KEY_PRESSED || event.keyCode != KeyEvent.VK_F) return false
+        val modifiers = event.modifiersEx
+        val findMask = KeyEvent.CTRL_DOWN_MASK or KeyEvent.META_DOWN_MASK
+        val blockedMask = KeyEvent.ALT_DOWN_MASK or KeyEvent.SHIFT_DOWN_MASK
+        return modifiers and findMask != 0 && modifiers and blockedMask == 0
+    }
+
+    private fun isFindShortcutContext(component: Component?): Boolean {
+        return shouldHandleTreeFindShortcut(
+            hasFocusContext = isTreeNavigationFocusContext(component),
+            isToolWindowActive = isEzCodeMarksToolWindowActive(),
+            hasRecentPanelInteraction = hasRecentPanelInteractionForSearch()
+        )
+    }
+
     private fun isTreeNavigationFocusContext(component: Component?): Boolean {
         if (component == null) return false
+        if (SwingUtilities.isDescendingFrom(component, this)) return true
         if (SwingUtilities.isDescendingFrom(component, tree)) return true
         val treeParent = tree.parent
         if (treeParent != null && SwingUtilities.isDescendingFrom(component, treeParent)) return true
         if (tree.isFocusOwner) return true
+        if (isEzCodeMarksToolWindowActive()) return true
         if (!treeSpeedSearch.isPopupActive) return false
         val treeWindow = SwingUtilities.getWindowAncestor(tree)
         val componentWindow = SwingUtilities.getWindowAncestor(component)
         return treeWindow != null && treeWindow === componentWindow
     }
 
+    private fun isEzCodeMarksToolWindowActive(): Boolean {
+        return ToolWindowManager.getInstance(project).activeToolWindowId == TOOL_WINDOW_ID
+    }
+
     private fun onSpeedSearchPrefixChanged(newPrefix: String?) {
         val normalized = newPrefix?.trim().orEmpty()
-        if (searchQuery == normalized) return
+        if (speedSearchPrefix == normalized) return
+        speedSearchPrefix = normalized
         val wasBlank = searchQuery.isBlank()
         if (normalized.isBlank()) {
             exitSearchMode()
             return
         }
+
+        val effectiveMode = resolveTreeSearchModeForPrefix(searchMode, forceNextSearchFull)
+        forceNextSearchFull = false
+        pendingSearchMode = false
+        searchMode = effectiveMode
         searchQuery = normalized
         searchResult = indexService.search(normalized)
-        if (wasBlank) {
+        if (effectiveMode == TreeSearchMode.FULL) {
             bootstrapSearchExpansion(normalized)
+        } else {
+            searchBootstrapExpandIds = emptySet()
+        }
+
+        if (wasBlank || effectiveMode == TreeSearchMode.FULL) {
             refreshTreeFromCurrentState()
             installTreeNavigationKeyDispatcher()
         } else {
             tree.repaint()
         }
         syncRendererSearchHighlight()
+        updateSearchModeLabel()
     }
 
     private fun syncRendererSearchHighlight() {
         renderer.speedSearchHighlightEnabled = searchQuery.isNotBlank()
     }
 
+    private fun updateSearchModeLabel() {
+        searchModeLabel.text = if (shouldShowSearchModeBadge()) {
+            treeSearchModeBadgeText(searchMode)
+        } else {
+            ""
+        }
+        searchModeLabel.isVisible = shouldShowSearchModeBadge()
+        (treeSpeedSearch as? AnchoredTreeSpeedSearch)?.moveToAnchor()
+    }
+
+    private fun toggleSearchModeFromFindShortcut() {
+        if (searchQuery.isBlank() && !treeSpeedSearch.isPopupActive) {
+            searchMode = treeSearchModeBeforeQueryInput()
+            pendingSearchMode = true
+            forceNextSearchFull = true
+            focusTreeForSearch()
+            installTreeNavigationKeyDispatcher()
+            updateSearchModeLabel()
+            return
+        }
+
+        val wasActive = isSearchInteractionActive()
+        searchMode = nextTreeSearchModeOnFind(searchMode, wasActive)
+        if (wasActive) {
+            if (searchMode == TreeSearchMode.FULL) {
+                bootstrapSearchExpansion(searchQuery)
+            } else {
+                searchBootstrapExpandIds = emptySet()
+            }
+            refreshTreeFromCurrentState()
+            syncRendererSearchHighlight()
+            updateSearchModeLabel()
+        } else {
+            pendingSearchMode = true
+            forceNextSearchFull = true
+            tree.requestFocusInWindow()
+            installTreeNavigationKeyDispatcher()
+            updateSearchModeLabel()
+        }
+    }
+
     /** ESC/清空前缀：清除搜索高亮与临时展开，恢复非搜索 ↑↓←→ 语义 */
     private fun exitSearchMode() {
+        pendingSearchMode = false
+        forceNextSearchFull = false
+        speedSearchPrefix = ""
         searchQuery = ""
         searchResult = BookmarkIndexService.SearchResult.EMPTY
         searchBootstrapExpandIds = emptySet()
         lastBuiltSearchAutoIds = emptySet()
         isSearchAutoExpanding = false
+        searchMode = treeSearchModeAfterExit()
         renderer.speedSearchHighlightEnabled = false
         refreshTreeAfterSearchExit()
+        updateSearchModeLabel()
     }
 
     private fun refreshTreeAfterSearchExit() {
@@ -939,6 +1147,22 @@ class BookmarkPanel(
         return searchQuery.isNotBlank()
     }
 
+    private fun isSearchUiActive(): Boolean {
+        return searchQuery.isNotBlank() || treeSpeedSearch.isPopupActive
+    }
+
+    private fun isSearchInteractionActive(): Boolean {
+        return pendingSearchMode || isSearchUiActive()
+    }
+
+    private fun shouldShowSearchModeBadge(): Boolean {
+        return shouldShowTreeSearchModeBadge(
+            pendingSearchMode = pendingSearchMode,
+            hasQuery = searchQuery.isNotBlank(),
+            isPopupActive = treeSpeedSearch.isPopupActive
+        )
+    }
+
     /**
      * 搜索期 ↑↓ 落点：所有可见节点，但过滤掉展开的容器节点（仅作为路径）。
      */
@@ -949,12 +1173,22 @@ class BookmarkPanel(
             val path = tree.getPathForRow(row) ?: continue
             val treeNode = path.lastPathComponent as? DefaultMutableTreeNode ?: continue
             val nodeView = treeNode.userObject as? NodeView ?: continue
-            if (hasSpeedSearchHighlight(nodeView.displayName)) {
-                stops.add(nodeView.node.uuid)
-                logger.debug("[SEARCH_STOP] Added highlighted visible node '${nodeView.displayName}'")
-            } else if (isCollapsedContainerWithHighlightedDescendant(path, nodeView.node)) {
-                stops.add(nodeView.node.uuid)
-                logger.debug("[SEARCH_STOP] Added collapsed container proxy '${nodeView.displayName}'")
+
+            if (searchMode == TreeSearchMode.VISIBLE_ONLY) {
+                // Only consider currently visible nodes, don't expand collapsed containers
+                if (hasSpeedSearchHighlight(nodeView.displayName)) {
+                    stops.add(nodeView.node.uuid)
+                    logger.debug("[SEARCH_STOP] Added highlighted visible node '${nodeView.displayName}'")
+                }
+            } else {
+                // Full mode: include collapsed containers with highlighted descendants
+                if (hasSpeedSearchHighlight(nodeView.displayName)) {
+                    stops.add(nodeView.node.uuid)
+                    logger.debug("[SEARCH_STOP] Added highlighted visible node '${nodeView.displayName}'")
+                } else if (isCollapsedContainerWithHighlightedDescendant(path, nodeView.node)) {
+                    stops.add(nodeView.node.uuid)
+                    logger.debug("[SEARCH_STOP] Added collapsed container proxy '${nodeView.displayName}'")
+                }
             }
         }
         logger.debug("[SEARCH_STOP] Final stops count=${stops.size}")
@@ -1208,9 +1442,55 @@ class BookmarkPanel(
         return tree.getPathForLocation(event.x, event.y) != null
     }
 
+    private fun installBlankViewportFocus(scrollPane: JBScrollPane) {
+        val blankFocusListener = object : MouseAdapter() {
+            override fun mousePressed(event: MouseEvent) {
+                if (event.button == MouseEvent.BUTTON1 || event.isPopupTrigger) {
+                    markPanelInteractionForSearch()
+                    focusTreeForSearch()
+                }
+            }
+
+            override fun mouseClicked(event: MouseEvent) {
+                if (event.button == MouseEvent.BUTTON1) {
+                    markPanelInteractionForSearch()
+                    focusTreeForSearch()
+                }
+            }
+        }
+        scrollPane.viewport.addMouseListener(blankFocusListener)
+        scrollPane.addMouseListener(blankFocusListener)
+    }
+
+    private fun installFindShortcutBindings(vararg components: JComponent) {
+        components.forEach { component ->
+            treeFindShortcutStrokes().forEach { stroke ->
+                val key = "ezCodeMarksFullSearch:${stroke}"
+                component.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(stroke, key)
+                component.actionMap.put(key, object : AbstractAction() {
+                    override fun actionPerformed(event: ActionEvent) {
+                        markPanelInteractionForSearch()
+                        toggleSearchModeFromFindShortcut()
+                    }
+                })
+            }
+        }
+    }
+
+    private fun markPanelInteractionForSearch() {
+        lastPanelInteractionAtMillis = System.currentTimeMillis()
+        installTreeNavigationKeyDispatcher()
+    }
+
+    private fun hasRecentPanelInteractionForSearch(): Boolean {
+        return System.currentTimeMillis() - lastPanelInteractionAtMillis <= SEARCH_INTERACTION_GRACE_MS
+    }
+
     private fun focusTreeForSearch() {
         if (!tree.hasFocus()) {
+            IdeFocusManager.getInstance(project).requestFocus(tree, true)
             tree.requestFocusInWindow()
+            tree.requestFocus()
         }
     }
 
@@ -1351,7 +1631,9 @@ class BookmarkPanel(
 
     /** 重建前把 JTree 当前展开并入缓存，避免 expandedNodeIds 滞后于 UI 时（如拖拽后）全树收缩。 */
     private fun mergeLiveTreeExpansionIntoPersistCache() {
-        collectExpandedNodeIdsFromTree().forEach { gutterPersistExpandIds.add(it) }
+        collectExpandedNodeIdsFromTree()
+            .filterNot { it in searchBootstrapExpandIds }
+            .forEach { gutterPersistExpandIds.add(it) }
     }
 
     private fun collectExpandedNodeIdsFromTree(): Set<String> {
@@ -2555,6 +2837,7 @@ class BookmarkPanel(
 
     companion object {
         private const val TOOL_WINDOW_ID = "EzCodeMarks"
+        private const val SEARCH_INTERACTION_GRACE_MS = 10_000L
 
         fun findActive(project: Project): BookmarkPanel? {
             val focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner

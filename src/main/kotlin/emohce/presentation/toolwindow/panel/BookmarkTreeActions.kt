@@ -43,7 +43,8 @@ internal class BookmarkTreeActions(
         val expandAllNestedUnderGroup: () -> Unit,
         val canExpandAllNestedUnderGroup: () -> Boolean,
         val selectedNode: () -> BookmarkNode?,
-        val prepareContextMenu: (MouseEvent?) -> Unit
+        val prepareContextMenu: (MouseEvent?) -> Unit,
+        val toggleSearchMode: () -> Unit
     )
 
     fun createToolbar(): JComponent {
@@ -146,6 +147,8 @@ internal class BookmarkTreeActions(
         bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_UP, KeyEvent.ALT_DOWN_MASK)) { callbacks.moveSibling(-1) }
         bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, KeyEvent.ALT_DOWN_MASK)) { callbacks.moveSibling(1) }
         bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), callbacks.activateSelected)
+        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_F, KeyEvent.CTRL_DOWN_MASK), callbacks.toggleSearchMode)
+        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_F, KeyEvent.META_DOWN_MASK), callbacks.toggleSearchMode)
     }
 
     private fun textButton(text: String, handler: () -> Unit, isEnabled: () -> Boolean = { true }): JButton {
