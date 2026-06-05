@@ -169,15 +169,14 @@ cd CodeMark
 
 ## 项目文档
 
-### 设计文档
-- **功能逻辑梳理**：[260126-cursor-功能逻辑梳理.md](./260126-cursor-功能逻辑梳理.md)
-- **重构方案**：[260126-cursor-重构方案.md](./260126-cursor-重构方案.md)
-- **TODO 列表**：[doc/CODE_REMARK_TOUR_TODO.md](./doc/CODE_REMARK_TOUR_TODO.md)
+### 用户文档
+- **用户指南**：[doc/USER_GUIDE.md](./doc/USER_GUIDE.md) - 详细功能使用说明
 
 ### 开发文档
+- **书签树操作规格**：[doc/260604-cursor-tree-operations-spec.md](./doc/260604-cursor-tree-operations-spec.md) - 树操作精确规格说明
 - **构建指南**：[doc/build-guide.md](./doc/build-guide.md)
 - **变更日志**：[doc/change-log.md](./doc/change-log.md)
-- **操作入口汇总**：[doc/260206-操作入口与快捷键汇总.md](./doc/260206-操作入口与快捷键汇总.md)
+- **归档文档**：[doc/archive/](./doc/archive/) - 历史文档与计划归档
 
 ## 开发指南
 

@@ -170,15 +170,14 @@ cd CodeRemarkTour
 
 ## Project Documentation
 
-### Design Documents
-- **Feature Logic Analysis**: [260126-cursor-功能逻辑梳理.md](./260126-cursor-功能逻辑梳理.md)
-- **Refactoring Plan**: [260126-cursor-重构方案.md](./260126-cursor-重构方案.md)
-- **TODO List**: [doc/CODE_REMARK_TOUR_TODO.md](./doc/CODE_REMARK_TOUR_TODO.md)
+### User Documentation
+- **User Guide**: [doc/USER_GUIDE.md](./doc/USER_GUIDE.md) - Detailed feature usage guide
 
 ### Development Documentation
+- **Tree Operations Specification**: [doc/260604-cursor-tree-operations-spec.md](./doc/260604-cursor-tree-operations-spec.md) - Precise tree operation specifications
 - **Build Guide**: [doc/build-guide.md](./doc/build-guide.md)
 - **Change Log**: [doc/change-log.md](./doc/change-log.md)
-- **Operation Summary**: [doc/260206-操作入口与快捷键汇总.md](./doc/260206-操作入口与快捷键汇总.md)
+- **Archive**: [doc/archive/](./doc/archive/) - Historical documents and plans
 
 ## Development Guide
 
