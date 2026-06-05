@@ -15,7 +15,7 @@ class BookmarkTreeModelBuilder(
     private val expandedNodeIds: Set<String>,
     private val searchQuery: String,
     private val searchResult: BookmarkIndexService.SearchResult,
-    private val project: Project
+    private val project: Project? = null
 ) {
     fun build(rootNode: BookmarkNode.Group?): DefaultMutableTreeNode {
         if (rootNode == null) return DefaultMutableTreeNode("No data")

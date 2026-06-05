@@ -33,9 +33,9 @@ class BookmarkTreeCellRenderer : ColoredTreeCellRenderer() {
             if (suffix.isNotBlank()) {
                 append(" $suffix", SimpleTextAttributes.GRAY_ATTRIBUTES)
             }
-            // Render broken bookmark description
-            if (nodeView.isFileBroken && nodeView.node.description.isNotBlank()) {
-                append(" - ${nodeView.node.description.trim().replace("\n", " ")}", SimpleTextAttributes.GRAY_ATTRIBUTES)
+            val descriptionPreview = nodeView.descriptionPreview
+            if (descriptionPreview.isNotBlank()) {
+                append(" $descriptionPreview", SimpleTextAttributes.GRAY_ATTRIBUTES)
             }
             toolTipText = nodeView.tooltip
             SpeedSearchUtil.applySpeedSearchHighlighting(tree, this, speedSearchHighlightEnabled, selected)

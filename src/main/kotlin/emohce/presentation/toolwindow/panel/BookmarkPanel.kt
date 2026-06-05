@@ -2,6 +2,7 @@ package emohce.presentation.toolwindow.panel
 
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.ide.BrowserUtil
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.Logger
@@ -11,13 +12,21 @@ import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.DialogWrapper
 import com.intellij.openapi.ui.Messages
+import com.intellij.openapi.ui.popup.JBPopup
+import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.ui.popup.JBPopupListener
+import com.intellij.openapi.ui.popup.LightweightWindowEvent
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.TreeSpeedSearch
+import com.intellij.ui.JBColor
+import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.speedSearch.SpeedSearchSupply
 import com.intellij.ui.treeStructure.Tree
+import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.FormBuilder
 import emohce.core.di.ServiceLocator
 import emohce.data.datasource.BookmarkPersistentDataSource
@@ -34,6 +43,7 @@ import emohce.presentation.toolwindow.BookmarkViewModel
 import emohce.presentation.toolwindow.BookmarkViewState
 import emohce.presentation.toolwindow.TreeRefreshKind
 import emohce.presentation.toolwindow.panel.render.BookmarkTreeCellRenderer
+import emohce.presentation.toolwindow.panel.render.NodeIcons
 import emohce.presentation.toolwindow.panel.util.BookmarkTreeUtil
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.launchIn
@@ -54,6 +64,7 @@ import java.awt.geom.Line2D
 import java.awt.geom.Path2D
 import java.io.File
 import javax.swing.*
+import javax.swing.event.HyperlinkEvent
 import javax.swing.tree.DefaultMutableTreeNode
 import javax.swing.tree.DefaultTreeModel
 import javax.swing.tree.TreePath
@@ -79,6 +90,228 @@ private fun toRelativePath(project: Project, absolutePath: String?): String? {
     }
 
     return FileUtil.toSystemIndependentName(absolutePath)
+}
+
+internal object MarkdownDetailsRenderer {
+    fun render(markdown: String): String {
+        val body = markdown.trim()
+        val rendered = if (body.isBlank()) {
+            """<p class="empty">No description</p>"""
+        } else {
+            renderBlocks(body)
+        }
+        val text = JBColor.foreground().css()
+        val muted = JBColor.GRAY.css()
+        val link = JBColor(0x2F65CA, 0x8AB4F8).css()
+        val blockBackground = JBColor(0xF3F6FB, 0x2B313A).css()
+        val codeBackground = JBColor(0xF6F8FA, 0x252A31).css()
+        val border = JBColor.border().css()
+        val accent = JBColor(0x4B7BFF, 0x7AA2FF).css()
+        return """
+            <html>
+            <head>
+              <style>
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                  font-size: 12px;
+                  margin: 0;
+                  color: $text;
+                }
+                h1, h2, h3 {
+                  margin: 6px 0 6px 0;
+                  font-weight: 700;
+                }
+                h1 { font-size: 18px; }
+                h2 { font-size: 16px; }
+                h3 { font-size: 14px; }
+                p { margin: 5px 0 8px 0; line-height: 1.35; }
+                ul, ol { margin: 5px 0 8px 18px; padding: 0; }
+                li { margin: 3px 0; }
+                blockquote {
+                  margin: 6px 0 8px 0;
+                  padding: 4px 8px;
+                  border-left: 3px solid $accent;
+                  color: $muted;
+                  background: $blockBackground;
+                }
+                pre {
+                  margin: 6px 0 8px 0;
+                  padding: 8px;
+                  background: $codeBackground;
+                  border: 1px solid $border;
+                  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+                  font-size: 11px;
+                }
+                code {
+                  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+                  background: $codeBackground;
+                }
+                a { color: $link; }
+                .empty { color: $muted; font-style: italic; }
+              </style>
+            </head>
+            <body>$rendered</body>
+            </html>
+        """.trimIndent()
+    }
+
+    private fun renderBlocks(markdown: String): String {
+        val out = StringBuilder()
+        val paragraph = mutableListOf<String>()
+        var inCode = false
+        val code = StringBuilder()
+        var listType: String? = null
+
+        fun flushParagraph() {
+            if (paragraph.isEmpty()) return
+            out.append("<p>")
+                .append(paragraph.joinToString("<br>") { renderInline(it) })
+                .append("</p>")
+            paragraph.clear()
+        }
+
+        fun closeList() {
+            listType?.let { out.append("</").append(it).append(">") }
+            listType = null
+        }
+
+        markdown.lineSequence().forEach { rawLine ->
+            val line = rawLine.trimEnd()
+            val trimmed = line.trim()
+            if (trimmed.startsWith("```")) {
+                if (inCode) {
+                    out.append("<pre><code>")
+                        .append(code.toString().escapeHtml())
+                        .append("</code></pre>")
+                    code.clear()
+                    inCode = false
+                } else {
+                    flushParagraph()
+                    closeList()
+                    inCode = true
+                }
+                return@forEach
+            }
+            if (inCode) {
+                code.append(line).append('\n')
+                return@forEach
+            }
+            if (trimmed.isBlank()) {
+                flushParagraph()
+                closeList()
+                return@forEach
+            }
+
+            val headingLevel = trimmed.takeWhile { it == '#' }.length
+            if (headingLevel in 1..3 && trimmed.getOrNull(headingLevel) == ' ') {
+                flushParagraph()
+                closeList()
+                out.append("<h").append(headingLevel).append(">")
+                    .append(renderInline(trimmed.drop(headingLevel + 1)))
+                    .append("</h").append(headingLevel).append(">")
+                return@forEach
+            }
+
+            if (trimmed.startsWith(">")) {
+                flushParagraph()
+                closeList()
+                out.append("<blockquote>")
+                    .append(renderInline(trimmed.drop(1).trim()))
+                    .append("</blockquote>")
+                return@forEach
+            }
+
+            val unordered = Regex("""^[-*]\s+(.+)$""").matchEntire(trimmed)
+            val ordered = Regex("""^\d+[.)]\s+(.+)$""").matchEntire(trimmed)
+            if (unordered != null || ordered != null) {
+                flushParagraph()
+                val tag = if (unordered != null) "ul" else "ol"
+                if (listType != tag) {
+                    closeList()
+                    out.append("<").append(tag).append(">")
+                    listType = tag
+                }
+                val item = unordered?.groupValues?.get(1) ?: ordered!!.groupValues[1]
+                out.append("<li>").append(renderInline(item)).append("</li>")
+                return@forEach
+            }
+
+            closeList()
+            paragraph.add(trimmed)
+        }
+
+        if (inCode) {
+            out.append("<pre><code>")
+                .append(code.toString().escapeHtml())
+                .append("</code></pre>")
+        }
+        flushParagraph()
+        closeList()
+        return out.toString()
+    }
+
+    private fun renderInline(text: String): String {
+        var html = text.escapeHtml()
+        html = Regex("""`([^`]+)`""").replace(html) { "<code>${it.groupValues[1]}</code>" }
+        html = Regex("""\*\*([^*]+)\*\*""").replace(html) { "<b>${it.groupValues[1]}</b>" }
+        html = Regex("""\*([^*]+)\*""").replace(html) { "<i>${it.groupValues[1]}</i>" }
+        html = Regex("""\[([^]]+)]\(([^)\s]+)\)""").replace(html) {
+            """<a href="${it.groupValues[2]}">${it.groupValues[1]}</a>"""
+        }
+        return html
+    }
+
+    private fun String.escapeHtml(): String {
+        return replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+    }
+
+    private fun Color.css(): String {
+        return "#%02x%02x%02x".format(red, green, blue)
+    }
+}
+
+internal data class ProjectRelativeMarkdownLink(
+    val path: String,
+    val line: Int = 0,
+    val column: Int = 0
+)
+
+internal object ProjectRelativeMarkdownLinkParser {
+    fun parse(rawTarget: String): ProjectRelativeMarkdownLink? {
+        val target = rawTarget.trim()
+        if (target.isBlank()) return null
+        if (target.startsWith("http://", ignoreCase = true) || target.startsWith("https://", ignoreCase = true)) {
+            return null
+        }
+
+        parseHashLine(target)?.let { return it }
+        parseColonLine(target)?.let { return it }
+        return ProjectRelativeMarkdownLink(path = target)
+    }
+
+    private fun parseHashLine(target: String): ProjectRelativeMarkdownLink? {
+        val match = Regex("""^(.+)#L(\d+)$""", RegexOption.IGNORE_CASE).matchEntire(target) ?: return null
+        val path = match.groupValues[1].trim()
+        if (path.isBlank()) return null
+        return ProjectRelativeMarkdownLink(
+            path = path,
+            line = match.groupValues[2].toIntOrNull()?.minus(1)?.coerceAtLeast(0) ?: 0
+        )
+    }
+
+    private fun parseColonLine(target: String): ProjectRelativeMarkdownLink? {
+        val match = Regex("""^(.+?):(\d+)(?::(\d+))?$""").matchEntire(target) ?: return null
+        val path = match.groupValues[1].trim()
+        if (path.isBlank()) return null
+        return ProjectRelativeMarkdownLink(
+            path = path,
+            line = match.groupValues[2].toIntOrNull()?.minus(1)?.coerceAtLeast(0) ?: 0,
+            column = match.groupValues.getOrNull(3)?.takeIf { it.isNotBlank() }?.toIntOrNull()?.minus(1)?.coerceAtLeast(0) ?: 0
+        )
+    }
 }
 
 class BookmarkPanel(
@@ -113,6 +346,7 @@ class BookmarkPanel(
     private var isHandlingTreeNavigationKey: Boolean = false
     private var isKeyboardTreeNavigating: Boolean = false
     private val treeNavigationKeyDeduplicator = TreeNavigationKeyDeduplicator()
+    private var detailsPopup: JBPopup? = null
     // 上次完整重建时使用的搜索临时展开集，用于判定纯选中/导航更新可跳过重建
     private var lastBuiltSearchAutoIds: Set<String> = emptySet()
     // 与 ViewModel expandedNodeIds 合并的 UI 展开缓存（Gutter/拖拽等重建前同步当前 JTree 展开，防全量收缩）
@@ -124,6 +358,7 @@ class BookmarkPanel(
         tree.isRootVisible = false
         tree.showsRootHandles = true
         tree.toggleClickCount = 0
+        tree.toolTipText = ""
         tree.cellRenderer = renderer
         treeSpeedSearch = TreeSpeedSearch.installOn(tree, true) { path ->
             val nodeView = (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject as? NodeView
@@ -2183,17 +2418,199 @@ class BookmarkPanel(
         group.createNotification(message, type).notify(project)
     }
 
+    fun showCurrentNodeDetails(): Boolean {
+        val target = tree.currentDetailsTarget() ?: return false
+        val nodeView = target.nodeView
+        if (nodeView.location.isBlank() && nodeView.fullDescription.isBlank()) return false
+
+        detailsPopup?.cancel()
+        detailsPopup = null
+
+        val accentColor = detailsAccentColor(nodeView)
+        val iconBadge = IconBadge(NodeIcons.iconFor(nodeView.node, nodeView.isReferencedTarget), accentColor)
+        val titleLabel = JLabel(nodeView.displayName).apply {
+            font = font.deriveFont(Font.BOLD, font.size2D + 3f)
+            foreground = JBColor.foreground()
+        }
+        val typeChip = ChipLabel(nodeKindLabel(nodeView.node), accentColor)
+        val refChip = nodeView.suffix.takeIf { it.isNotBlank() }?.let {
+            ChipLabel(it.removePrefix("[").removeSuffix("]"), JBColor(0x6F7A8A, 0xA8B0BE))
+        }
+        val metaRow = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            add(typeChip)
+            refChip?.let {
+                add(Box.createHorizontalStrut(6))
+                add(it)
+            }
+            add(Box.createHorizontalStrut(6))
+            add(ChipLabel(nodeView.location.ifBlank { "No file location" }, JBColor(0x596579, 0xAEB6C4), filled = false))
+        }
+        val topRow = JPanel(BorderLayout(10, 0)).apply {
+            isOpaque = false
+            add(metaRow, BorderLayout.WEST)
+            add(iconBadge, BorderLayout.EAST)
+        }
+        val titleRow = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = JBUI.Borders.emptyTop(9)
+            add(titleLabel, BorderLayout.WEST)
+        }
+        val header = JPanel(BorderLayout()).apply {
+            isOpaque = false
+            border = JBUI.Borders.empty(16, 18, 12, 18)
+            add(topRow, BorderLayout.NORTH)
+            add(titleRow, BorderLayout.SOUTH)
+        }
+
+        val descriptionPane = JEditorPane().apply {
+            contentType = "text/html"
+            isEditable = false
+            isOpaque = false
+            border = JBUI.Borders.empty(10, 12)
+            text = MarkdownDetailsRenderer.render(nodeView.fullDescription)
+            addHyperlinkListener { event ->
+                if (event.eventType == HyperlinkEvent.EventType.ACTIVATED) {
+                    openMarkdownLink(event)
+                }
+            }
+        }
+        val sectionLabel = JLabel("DESCRIPTION").apply {
+            foreground = JBColor.GRAY
+            font = font.deriveFont(Font.BOLD, font.size2D - 1f)
+            border = JBUI.Borders.empty(0, 0, 7, 0)
+        }
+        val body = JBScrollPane(descriptionPane).apply {
+            border = BorderFactory.createLineBorder(JBColor.border())
+            preferredSize = Dimension(500, 310)
+        }
+        val bodyWrap = RoundedPanel(JBColor(0xFFFFFF, 0x24272D), JBColor.border(), 10).apply {
+            layout = BorderLayout()
+            border = JBUI.Borders.empty(11, 12, 12, 12)
+            add(sectionLabel, BorderLayout.NORTH)
+            add(body, BorderLayout.CENTER)
+        }
+        val content = DetailsPopupPanel(accentColor).apply {
+            layout = BorderLayout()
+            border = JBUI.Borders.empty(0, 0, 14, 0)
+            add(header, BorderLayout.NORTH)
+            add(bodyWrap, BorderLayout.CENTER)
+        }
+
+        val popup = JBPopupFactory.getInstance()
+            .createComponentPopupBuilder(content, descriptionPane)
+            .setMovable(true)
+            .setResizable(true)
+            .setRequestFocus(false)
+            .createPopup()
+
+        popup.addListener(object : JBPopupListener {
+            override fun onClosed(event: LightweightWindowEvent) {
+                if (detailsPopup === popup) detailsPopup = null
+            }
+        })
+        detailsPopup = popup
+        popup.show(RelativePoint(tree, target.point))
+        return true
+    }
+
+    private fun openMarkdownLink(event: HyperlinkEvent) {
+        event.url?.let { url ->
+            if (url.protocol == "http" || url.protocol == "https") {
+                BrowserUtil.browse(url)
+                return
+            }
+        }
+        val target = event.description ?: event.url?.toExternalForm() ?: return
+        val projectLink = ProjectRelativeMarkdownLinkParser.parse(target)
+        if (projectLink == null) {
+            notify("Unsupported link: $target", NotificationType.WARNING)
+            return
+        }
+        navigateToFile(projectLink.path, projectLink.line, projectLink.column)
+    }
+
+    private fun nodeKindLabel(node: BookmarkNode): String {
+        return when (node) {
+            is BookmarkNode.Bookmark -> "CODEMARK"
+            is BookmarkNode.Group -> "GROUP"
+            is BookmarkNode.Process -> "PROCESS"
+            is BookmarkNode.DescriptiveBookmark -> "NOTE"
+        }
+    }
+
+    private fun detailsAccentColor(nodeView: NodeView): JBColor {
+        return when {
+            nodeView.isReferencedTarget -> JBColor(0x7C5CFF, 0xA892FF)
+            nodeView.node is BookmarkNode.Bookmark -> JBColor(0x3278F6, 0x78A8FF)
+            nodeView.node is BookmarkNode.Group -> JBColor(0xD9822B, 0xE7A45D)
+            nodeView.node is BookmarkNode.Process -> JBColor(0x2B9E6D, 0x5CC895)
+            else -> JBColor(0x8B5CF6, 0xB79CFF)
+        }
+    }
+
+    companion object {
+        private const val TOOL_WINDOW_ID = "EzCodeMarks"
+
+        fun findActive(project: Project): BookmarkPanel? {
+            val focusOwner = KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+            findAncestorPanel(focusOwner)?.let { return it }
+
+            val toolWindow = ToolWindowManager.getInstance(project).getToolWindow(TOOL_WINDOW_ID) ?: return null
+            return findDescendantPanel(toolWindow.component)
+        }
+
+        private fun findAncestorPanel(component: Component?): BookmarkPanel? {
+            var current = component
+            while (current != null) {
+                if (current is BookmarkPanel) return current
+                current = current.parent
+            }
+            return null
+        }
+
+        private fun findDescendantPanel(component: Component?): BookmarkPanel? {
+            if (component == null) return null
+            if (component is BookmarkPanel) return component
+            if (component !is Container) return null
+            for (child in component.components) {
+                findDescendantPanel(child)?.let { return it }
+            }
+            return null
+        }
+    }
+
     data class NodeView(
         val node: BookmarkNode,
         val referenceCount: Int,
         val isReferencedTarget: Boolean,
         val pathLabel: String,
         val isFileBroken: Boolean = false,
-        val project: Project
+        val project: Project? = null
     ) {
         val displayName: String = node.name.ifBlank { "(unnamed)" }
         val suffix: String = buildSuffix()
+        val descriptionPreview: String = buildDescriptionPreview()
+        val location: String = buildLocation()
+        val fullDescription: String = node.description.trim()
         val tooltip: String = buildTooltip()
+        val detailedTooltip: String = buildDetailedTooltip()
+
+        constructor(
+            node: BookmarkNode,
+            referenceCount: Int,
+            isReferencedTarget: Boolean,
+            pathLabel: String
+        ) : this(node, referenceCount, isReferencedTarget, pathLabel, false, null)
+
+        constructor(
+            node: BookmarkNode,
+            referenceCount: Int,
+            isReferencedTarget: Boolean,
+            pathLabel: String,
+            isFileBroken: Boolean
+        ) : this(node, referenceCount, isReferencedTarget, pathLabel, isFileBroken, null)
 
         private fun buildSuffix(): String {
             val parts = mutableListOf<String>()
@@ -2202,16 +2619,38 @@ class BookmarkPanel(
             return if (parts.isEmpty()) "" else "[${parts.joinToString(", ")}]"
         }
 
-        private fun buildTooltip(): String {
+        private fun buildDescriptionPreview(): String {
+            if (node !is BookmarkNode.Bookmark && node !is BookmarkNode.Group) return ""
+            return node.description
+                .lineSequence()
+                .map { it.trim() }
+                .firstOrNull { it.isNotEmpty() }
+                .orEmpty()
+        }
+
+        private fun buildLocation(): String {
             if (node is BookmarkNode.Bookmark) {
-                val relativePath = toRelativePath(project, node.filePath) ?: node.filePath
+                val relativePath = project?.let { toRelativePath(it, node.filePath) } ?: node.filePath
                 return "$relativePath:${node.line + 1}"
             }
             return ""
         }
 
+        private fun buildTooltip(): String {
+            return location
+        }
+
+        private fun buildDetailedTooltip(): String {
+            val parts = mutableListOf<String>()
+            if (location.isNotBlank()) parts.add(location)
+            if (fullDescription.isNotBlank()) parts.add(fullDescription)
+            return parts.joinToString("\n\n")
+        }
+
         override fun toString(): String {
-            return if (suffix.isEmpty()) displayName else "$displayName $suffix"
+            return listOf(displayName, suffix, descriptionPreview)
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
         }
     }
 
@@ -2221,6 +2660,8 @@ class BookmarkPanel(
 
 
     override fun dispose() {
+        detailsPopup?.cancel()
+        detailsPopup = null
         speedSearchKeyDispatcher?.let {
             KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(it)
         }
@@ -2232,6 +2673,49 @@ class BookmarkPanel(
 
 private class BookmarkDropPreviewTree(model: DefaultTreeModel) : Tree(model) {
     var navigationKeyHandler: ((KeyEvent) -> Boolean)? = null
+    private var lastTooltipPoint: Point? = null
+
+    override fun getToolTipText(event: MouseEvent?): String? {
+        if (event == null) return super.getToolTipText(event)
+        val path = getPathForLocation(event.x, event.y) ?: return null
+        val nodeView = (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject as? BookmarkPanel.NodeView
+            ?: return null
+        val tooltip = nodeView.tooltip
+        return tooltip.takeIf { it.isNotBlank() }?.toHtmlTooltip()
+    }
+
+    fun currentDetailsTarget(): DetailsTarget? {
+        val pointerPoint = lastTooltipPoint ?: pointerLocationInTree()
+        if (pointerPoint != null && contains(pointerPoint)) {
+            nodeViewAt(pointerPoint)?.let { return DetailsTarget(it, pointerPoint) }
+        }
+
+        val path = selectionPath ?: return null
+        val nodeView = (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject as? BookmarkPanel.NodeView
+            ?: return null
+        val bounds = getPathBounds(path)
+        val point = if (bounds != null) {
+            Point((bounds.x + bounds.width / 2).coerceAtLeast(8), bounds.y + bounds.height)
+        } else {
+            Point(width / 2, height / 2)
+        }
+        return DetailsTarget(nodeView, point)
+    }
+
+    override fun processMouseEvent(event: MouseEvent) {
+        when (event.id) {
+            MouseEvent.MOUSE_ENTERED -> lastTooltipPoint = event.point
+            MouseEvent.MOUSE_EXITED -> {
+                lastTooltipPoint = null
+            }
+        }
+        super.processMouseEvent(event)
+    }
+
+    override fun processMouseMotionEvent(event: MouseEvent) {
+        lastTooltipPoint = event.point
+        super.processMouseMotionEvent(event)
+    }
 
     override fun processKeyEvent(event: KeyEvent) {
         if (event.isConsumed) return
@@ -2286,5 +2770,141 @@ private class BookmarkDropPreviewTree(model: DefaultTreeModel) : Tree(model) {
 
     private fun repaintPreviewArea(bounds: Rectangle) {
         repaint(0, (bounds.y - 6).coerceAtLeast(0), width, bounds.height + 12)
+    }
+
+    private fun pointerLocationInTree(): Point? {
+        val pointer = MouseInfo.getPointerInfo()?.location ?: return null
+        SwingUtilities.convertPointFromScreen(pointer, this)
+        return pointer
+    }
+
+    private fun nodeViewAt(point: Point): BookmarkPanel.NodeView? {
+        val path = getPathForLocation(point.x, point.y) ?: return null
+        return (path.lastPathComponent as? DefaultMutableTreeNode)?.userObject as? BookmarkPanel.NodeView
+    }
+
+    private fun String.toHtmlTooltip(): String {
+        return lineSequence()
+            .joinToString("<br>") { it.escapeHtml() }
+            .let { "<html>$it</html>" }
+    }
+
+    private fun String.escapeHtml(): String {
+        return replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+    }
+
+    data class DetailsTarget(
+        val nodeView: BookmarkPanel.NodeView,
+        val point: Point
+    )
+}
+
+private open class RoundedPanel(
+    private val fill: Color,
+    private val stroke: Color,
+    private val radius: Int
+) : JPanel() {
+    init {
+        isOpaque = false
+    }
+
+    override fun paintComponent(g: Graphics) {
+        val g2 = g.create() as Graphics2D
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g2.color = fill
+            g2.fillRoundRect(0, 0, width - 1, height - 1, radius, radius)
+            g2.color = stroke
+            g2.drawRoundRect(0, 0, width - 1, height - 1, radius, radius)
+        } finally {
+            g2.dispose()
+        }
+        super.paintComponent(g)
+    }
+}
+
+private class DetailsPopupPanel(
+    private val accent: Color
+) : JPanel() {
+    init {
+        isOpaque = false
+    }
+
+    override fun paintComponent(g: Graphics) {
+        val g2 = g.create() as Graphics2D
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            val bg = JBColor(0xF8FAFE, 0x1F2329)
+            val border = JBColor(0xCAD3E1, 0x3A414D)
+            g2.color = bg
+            g2.fillRoundRect(0, 0, width - 1, height - 1, 14, 14)
+            g2.color = accent
+            g2.fillRoundRect(0, 0, 5, height - 1, 14, 14)
+            g2.color = border
+            g2.drawRoundRect(0, 0, width - 1, height - 1, 14, 14)
+        } finally {
+            g2.dispose()
+        }
+        super.paintComponent(g)
+    }
+}
+
+private class IconBadge(
+    icon: Icon,
+    private val accent: Color
+) : JLabel(icon) {
+    init {
+        horizontalAlignment = CENTER
+        verticalAlignment = CENTER
+        preferredSize = Dimension(34, 34)
+        minimumSize = preferredSize
+        maximumSize = preferredSize
+        isOpaque = false
+    }
+
+    override fun paintComponent(g: Graphics) {
+        val g2 = g.create() as Graphics2D
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            val bg = Color(accent.red, accent.green, accent.blue, 36)
+            g2.color = bg
+            g2.fillRoundRect(0, 0, width - 1, height - 1, 10, 10)
+            g2.color = Color(accent.red, accent.green, accent.blue, 120)
+            g2.drawRoundRect(0, 0, width - 1, height - 1, 10, 10)
+        } finally {
+            g2.dispose()
+        }
+        super.paintComponent(g)
+    }
+}
+
+private class ChipLabel(
+    text: String,
+    private val accent: Color,
+    private val filled: Boolean = true
+) : JLabel(text) {
+    init {
+        font = font.deriveFont(Font.BOLD, (font.size - 1).coerceAtLeast(10).toFloat())
+        foreground = if (filled) accent else JBColor.GRAY
+        border = JBUI.Borders.empty(4, 8)
+        isOpaque = false
+    }
+
+    override fun paintComponent(g: Graphics) {
+        val g2 = g.create() as Graphics2D
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            val fillAlpha = if (filled) 34 else 0
+            g2.color = Color(accent.red, accent.green, accent.blue, fillAlpha)
+            g2.fillRoundRect(0, 0, width - 1, height - 1, 12, 12)
+            g2.color = Color(accent.red, accent.green, accent.blue, 92)
+            g2.drawRoundRect(0, 0, width - 1, height - 1, 12, 12)
+        } finally {
+            g2.dispose()
+        }
+        super.paintComponent(g)
     }
 }

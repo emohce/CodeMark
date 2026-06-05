@@ -95,5 +95,11 @@
             <keyboard-shortcut keymap="macOS" first-keystroke="meta shift F2"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action id="EzCodeMarks.ShowCodemarkDetails"
+                class="emohce.presentation.action.ShowCodemarkDetailsAction"
+                text="Show CodeMark Details"
+                description="Show details for the hovered or selected CodeMark tree node">
+            <keyboard-shortcut keymap="$default" first-keystroke="F1"/>
+        </action>
     </actions>
 </idea-plugin>
