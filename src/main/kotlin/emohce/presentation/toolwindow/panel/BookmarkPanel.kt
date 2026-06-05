@@ -2617,8 +2617,8 @@ class BookmarkPanel(
 
         private fun buildSuffix(): String {
             val parts = mutableListOf<String>()
-            if (referenceCount > 0) parts.add("refs:$referenceCount")
-            if (isReferencedTarget) parts.add("ref")
+            if (referenceCount > 0) parts.add("*refs:*`$referenceCount`")
+            if (isReferencedTarget) parts.add("*ref*")
             return if (parts.isEmpty()) "" else "[${parts.joinToString(", ")}]"
         }
 

@@ -1,30 +1,63 @@
 {
-    "root": {
-        "uuid": "ad2cae4d-a073-4508-8e4a-364f7f7e3d4d",
-        "name": "1",
-        "createdAt": 1776074442962,
-        "modifiedAt": 1776074442962,
-        "children": [
-            {
-                "type": "bookmark",
-                "uuid": "5a2f7b28-3236-4f5b-b2da-95c19624c5dc",
-                "name": "2314123",
-                "createdAt": 1776074570775,
-                "modifiedAt": 1776074570775,
-                "filePath": "src/main/kotlin/emohce/data/repository/BookmarkRepositoryImpl.kt",
-                "line": 267,
-                "column": 38
-            },
-            {
-                "type": "bookmark",
-                "uuid": "dde50d54-38f6-4cc4-a19a-59752fb3522f",
-                "name": "1",
-                "createdAt": 1776074502467,
-                "modifiedAt": 1776074502467,
-                "filePath": "src/main/kotlin/emohce/data/repository/BookmarkRepositoryImpl.kt",
-                "line": 19,
-                "column": 18
-            }
+    "nodes": {
+        "ad2cae4d-a073-4508-8e4a-364f7f7e3d4d": {
+            "type": "group",
+            "uuid": "ad2cae4d-a073-4508-8e4a-364f7f7e3d4d",
+            "name": "1",
+            "createdAt": 1776074442962,
+            "modifiedAt": 1776074442962
+        },
+        "dde50d54-38f6-4cc4-a19a-59752fb3522f": {
+            "type": "bookmark",
+            "uuid": "dde50d54-38f6-4cc4-a19a-59752fb3522f",
+            "name": "1",
+            "createdAt": 1776074502467,
+            "modifiedAt": 1776074502467,
+            "filePath": "src/main/kotlin/emohce/data/repository/BookmarkRepositoryImpl.kt",
+            "line": 19,
+            "column": 18
+        },
+        "280f810e-f519-4bfc-956f-82966257263f": {
+            "type": "bookmark",
+            "uuid": "280f810e-f519-4bfc-956f-82966257263f",
+            "name": "1.2",
+            "description": ":",
+            "createdAt": 1780622765207,
+            "modifiedAt": 1780622765207,
+            "filePath": "src/main/kotlin/emohce/data/repository/BookmarkStore.kt",
+            "line": 173,
+            "column": 12
+        },
+        "2c7280d6-48ff-4ace-aa25-374ebe7ff94c": {
+            "type": "bookmark",
+            "uuid": "2c7280d6-48ff-4ace-aa25-374ebe7ff94c",
+            "name": "2. 22",
+            "createdAt": 1780622631228,
+            "modifiedAt": 1780622631228,
+            "filePath": "src/main/kotlin/emohce/data/repository/BookmarkRepositoryImpl.kt",
+            "line": 24,
+            "column": 18
+        },
+        "c601fa50-0d71-46c6-bea2-79f63c26e6f2": {
+            "type": "bookmark",
+            "uuid": "c601fa50-0d71-46c6-bea2-79f63c26e6f2",
+            "name": "2.3",
+            "createdAt": 1780622777585,
+            "modifiedAt": 1780622777585,
+            "filePath": "src/main/kotlin/emohce/data/repository/BookmarkStore.kt",
+            "line": 174,
+            "column": 12
+        }
+    },
+    "children": {
+        "ad2cae4d-a073-4508-8e4a-364f7f7e3d4d": [
+            "dde50d54-38f6-4cc4-a19a-59752fb3522f",
+            "280f810e-f519-4bfc-956f-82966257263f",
+            "2c7280d6-48ff-4ace-aa25-374ebe7ff94c",
+            "c601fa50-0d71-46c6-bea2-79f63c26e6f2"
         ]
-    }
+    },
+    "roots": [
+        "ad2cae4d-a073-4508-8e4a-364f7f7e3d4d"
+    ]
 }

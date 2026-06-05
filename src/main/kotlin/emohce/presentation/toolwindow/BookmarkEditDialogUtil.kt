@@ -35,7 +35,7 @@ object BookmarkEditDialogUtil {
 
     fun editBookmark(project: Project, node: BookmarkNode.Bookmark, title: String): BookmarkNode.Bookmark? {
         val nameField = JTextField(node.name)
-        val descField = multilineEditorTextField(project, node.description, 5)
+        val descField = multilineTextArea(node.description, 5)
         val descScrollPane = JScrollPane(descField)
         val pathField = JTextField(bookmarkDisplayPath(node.filePath, project.basePath))
         val lineField = JTextField(node.line.toString())
@@ -51,35 +51,11 @@ object BookmarkEditDialogUtil {
             .addLabeledComponent("File path", pathField)
             .panel
 
-        // Auto-expand description field on focus and text change
-        fun updateDescHeight() {
-            val editor = descField.editor as? EditorImpl ?: return
-            val lineCount = descField.document.lineCount
-            val newRows = maxOf(5, minOf(lineCount, 10))
-            val lineHeight = editor.lineHeight
-            val newHeight = lineHeight * newRows + 8
-            descField.preferredSize = java.awt.Dimension(400, newHeight)
-            descScrollPane.preferredSize = java.awt.Dimension(450, newHeight + 10)
-            descScrollPane.revalidate()
-            descScrollPane.repaint()
-        }
-        descField.addFocusListener(object : java.awt.event.FocusAdapter() {
-            override fun focusGained(e: java.awt.event.FocusEvent) {
-                updateDescHeight()
-            }
-        })
-        descField.document.addDocumentListener(object : DocumentListener {
-            override fun documentChanged(event: DocumentEvent) = updateDescHeight()
-        })
-
-        installOpenEditorShortcut(project, descField, "Edit Description")
-
         val fields = listOf(nameField, descField, lineField, columnField, pathField)
         setupCommandNumberNavigation(fields)
-        setupEditorTextFieldNavigation(descField, fields, 1)
+        setupTextAreaNavigation(descField, fields, 1)
 
-        val result = showPanelOkCancelWithEditor(project, panel, title, nameField, descField)
-        if (!result) return null
+        if (!showPanelOkCancel(project, panel, title, nameField)) return null
         val path = bookmarkStoragePath(pathField.text.trim(), project.basePath)
         if (!ensureFileExists(path, title)) return null
         val line = (lineField.text.trim().toIntOrNull() ?: node.line).coerceAtLeast(0)
@@ -96,7 +72,7 @@ object BookmarkEditDialogUtil {
     fun editDescriptive(project: Project, node: BookmarkNode.DescriptiveBookmark): BookmarkNode.DescriptiveBookmark? {
         val nameField = JTextField(node.name)
         val descField = JTextField(node.description)
-        val markdownField = multilineEditorTextField(project, node.markdownContent, 6)
+        val markdownField = multilineTextArea(node.markdownContent, 6)
         val panel = FormBuilder.createFormBuilder()
             .addLabeledComponent("Name", nameField)
             .addLabeledComponent("Description", descField)
@@ -105,11 +81,9 @@ object BookmarkEditDialogUtil {
 
         val fields = listOf(nameField, descField, markdownField)
         setupCommandNumberNavigation(fields)
-        setupEditorTextFieldNavigation(markdownField, fields, 2)
-        installOpenEditorShortcut(project, markdownField, "Edit Markdown")
+        setupTextAreaNavigation(markdownField, fields, 2)
 
-        val result = showPanelOkCancelWithEditor(project, panel, "Edit Description", nameField, markdownField)
-        if (!result) return null
+        if (!showPanelOkCancel(project, panel, "Edit Description", nameField, requireDoubleEsc = true)) return null
         return node.copy(
             name = nameField.text.trim(),
             description = descField.text.trim(),
@@ -159,8 +133,11 @@ object BookmarkEditDialogUtil {
         )
     }
 
-    private fun showPanelOkCancel(project: Project, panel: JPanel, title: String, preferredFocus: JComponent? = null): Boolean {
+    private fun showPanelOkCancel(project: Project, panel: JPanel, title: String, preferredFocus: JComponent? = null, requireDoubleEsc: Boolean = false): Boolean {
         val dialog = object : DialogWrapper(project) {
+            private var lastEscTime = 0L
+            private val ESC_DOUBLE_PRESS_THRESHOLD = 500L // ms
+
             init {
                 this.title = title
                 init()
@@ -169,20 +146,21 @@ object BookmarkEditDialogUtil {
             override fun createCenterPanel(): JComponent = panel
 
             override fun getPreferredFocusedComponent(): JComponent? = preferredFocus
-        }
-        return dialog.showAndGet()
-    }
 
-    private fun showPanelOkCancelWithEditor(project: Project, panel: JPanel, title: String, preferredFocus: JComponent?, editorField: EditorTextField): Boolean {
-        val dialog = object : DialogWrapper(project) {
-            init {
-                this.title = title
-                init()
+            override fun doCancelAction() {
+                if (requireDoubleEsc) {
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastEscTime < ESC_DOUBLE_PRESS_THRESHOLD) {
+                        // Double ESC pressed, close the dialog
+                        super.doCancelAction()
+                    } else {
+                        // Single ESC, just record the time and let IdeaVim handle it
+                        lastEscTime = currentTime
+                    }
+                } else {
+                    super.doCancelAction()
+                }
             }
-
-            override fun createCenterPanel(): JComponent = panel
-
-            override fun getPreferredFocusedComponent(): JComponent? = preferredFocus
         }
         return dialog.showAndGet()
     }
@@ -193,95 +171,10 @@ object BookmarkEditDialogUtil {
         return false
     }
 
-    private fun multilineEditorTextField(project: Project, text: String, rows: Int): EditorTextField {
-        val document = EditorFactory.getInstance().createDocument(text)
-        val editorTextField = EditorTextField(document, project, null, false).apply {
-            setPreferredWidth(400)
-            setOneLineMode(false)
-            preferredSize = java.awt.Dimension(400, rows * 16)
-        }
-        return editorTextField
-    }
-
-    private fun openEditorInDialog(project: Project, editorField: EditorTextField, title: String) {
-        val document = editorField.document
-        val editor = EditorFactory.getInstance().createEditor(document, project)
-        val editorComponent = editor.component
-        editor.caretModel.moveToOffset(0)
-        
-        val dialog = object : DialogWrapper(project) {
-            init {
-                this.title = title
-                init()
-            }
-
-            override fun createCenterPanel(): JComponent {
-                val panel = JPanel(java.awt.BorderLayout())
-                panel.add(editorComponent, java.awt.BorderLayout.CENTER)
-                panel.preferredSize = java.awt.Dimension(600, 400)
-                return panel
-            }
-
-            override fun getPreferredFocusedComponent(): JComponent = editor.contentComponent
-
-            override fun createActions(): Array<javax.swing.Action> = emptyArray()
-
-            override fun doCancelAction() {
-                // ESC closes the dialog, content is already synced
-                super.doCancelAction()
-            }
-
-            override fun dispose() {
-                EditorFactory.getInstance().releaseEditor(editor)
-                super.dispose()
-            }
-        }
-        
-        dialog.show()
-        javax.swing.SwingUtilities.invokeLater {
-            editor.caretModel.moveToOffset(0)
-            editor.scrollingModel.scrollToCaret(com.intellij.openapi.editor.ScrollType.CENTER_UP)
-            editor.contentComponent.requestFocusInWindow()
-        }
-    }
-
-    private fun installOpenEditorShortcut(project: Project, editorField: EditorTextField, title: String) {
-        val action = object : AbstractAction() {
-            override fun actionPerformed(e: ActionEvent) {
-                openEditorInDialog(project, editorField, title)
-            }
-        }
-
-        fun bind(component: JComponent) {
-            component.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0), "openEditorDialog")
-            component.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0), "openEditorDialog")
-            component.actionMap.put("openEditorDialog", action)
-        }
-
-        fun bindEditorComponents() {
-            val editor = editorField.editor ?: return
-            bind(editor.component)
-            bind(editor.contentComponent)
-            if (editor.contentComponent.getClientProperty("ezcodemarks.openEditorF2") == true) return
-            editor.contentComponent.putClientProperty("ezcodemarks.openEditorF2", true)
-            editor.contentComponent.addKeyListener(object : KeyAdapter() {
-                override fun keyPressed(e: KeyEvent) {
-                    if (e.keyCode == KeyEvent.VK_F2 && e.modifiersEx == 0) {
-                        e.consume()
-                        openEditorInDialog(project, editorField, title)
-                    }
-                }
-            })
-        }
-
-        bind(editorField)
-        editorField.addFocusListener(object : java.awt.event.FocusAdapter() {
-            override fun focusGained(e: java.awt.event.FocusEvent) {
-                bindEditorComponents()
-            }
-        })
-        javax.swing.SwingUtilities.invokeLater {
-            bindEditorComponents()
+    private fun multilineTextArea(text: String, rows: Int): JTextArea {
+        return JTextArea(text, rows, 40).apply {
+            lineWrap = true
+            wrapStyleWord = true
         }
     }
 
@@ -329,44 +222,41 @@ object BookmarkEditDialogUtil {
         }
     }
 
-    private fun setupEditorTextFieldNavigation(editorField: EditorTextField, fields: List<JComponent>, fieldIndex: Int) {
+    private fun setupTextAreaNavigation(textArea: JTextArea, fields: List<JComponent>, fieldIndex: Int) {
         val nextField = if (fieldIndex < fields.size - 1) fields[fieldIndex + 1] else fields[0]
         val prevField = if (fieldIndex > 0) fields[fieldIndex - 1] else fields[fields.size - 1]
 
         // Disable default focus traversal to allow custom Tab handling
-        editorField.focusTraversalKeysEnabled = false
+        textArea.focusTraversalKeysEnabled = false
 
         // Move caret to start on focus gain instead of selecting all
-        editorField.addFocusListener(object : java.awt.event.FocusAdapter() {
+        textArea.addFocusListener(object : java.awt.event.FocusAdapter() {
             override fun focusGained(e: java.awt.event.FocusEvent) {
-                editorField.editor?.caretModel?.moveToOffset(0)
+                textArea.caretPosition = 0
             }
         })
 
         // Tab: navigate to next field
-        editorField.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), "tabNext")
-        editorField.actionMap.put("tabNext", object : AbstractAction() {
+        textArea.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), "tabNext")
+        textArea.actionMap.put("tabNext", object : AbstractAction() {
             override fun actionPerformed(e: ActionEvent) {
                 nextField.requestFocusInWindow()
             }
         })
 
         // Shift+Tab: navigate to previous field
-        editorField.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, KeyEvent.SHIFT_DOWN_MASK), "tabPrev")
-        editorField.actionMap.put("tabPrev", object : AbstractAction() {
+        textArea.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, KeyEvent.SHIFT_DOWN_MASK), "tabPrev")
+        textArea.actionMap.put("tabPrev", object : AbstractAction() {
             override fun actionPerformed(e: ActionEvent) {
                 prevField.requestFocusInWindow()
             }
         })
 
         // Shift+Enter: insert newline
-        editorField.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, KeyEvent.SHIFT_DOWN_MASK), "shiftEnter")
-        editorField.actionMap.put("shiftEnter", object : AbstractAction() {
+        textArea.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, KeyEvent.SHIFT_DOWN_MASK), "shiftEnter")
+        textArea.actionMap.put("shiftEnter", object : AbstractAction() {
             override fun actionPerformed(e: ActionEvent) {
-                val editor = editorField.editor
-                if (editor != null) {
-                    editor.document.insertString(editor.caretModel.offset, "\n")
-                }
+                textArea.insert("\n", textArea.caretPosition)
             }
         })
     }

@@ -11,6 +11,52 @@ class BookmarkTreeCellRenderer : ColoredTreeCellRenderer() {
     var highlightNodeId: String? = null
     var speedSearchHighlightEnabled: Boolean = false
 
+    private fun appendMarkdownText(text: String, baseColor: Color) {
+        val plainAttrs = SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, baseColor)
+        var i = 0
+        while (i < text.length) {
+            when {
+                // Bold: **text**
+                text.startsWith("**", i) -> {
+                    val end = text.indexOf("**", i + 2)
+                    if (end != -1) {
+                        append(text.substring(i + 2, end), SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, baseColor))
+                        i = end + 2
+                    } else {
+                        append(text[i].toString(), plainAttrs)
+                        i++
+                    }
+                }
+                // Italic: *text*
+                text.startsWith("*", i) && (i == 0 || text[i - 1] != '*') -> {
+                    val end = text.indexOf("*", i + 1)
+                    if (end != -1 && (end + 1 >= text.length || text[end + 1] != '*')) {
+                        append(text.substring(i + 1, end), SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC, baseColor))
+                        i = end + 1
+                    } else {
+                        append(text[i].toString(), plainAttrs)
+                        i++
+                    }
+                }
+                // Code: `text`
+                text.startsWith("`", i) -> {
+                    val end = text.indexOf("`", i + 1)
+                    if (end != -1) {
+                        append(text.substring(i + 1, end), SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, baseColor))
+                        i = end + 1
+                    } else {
+                        append(text[i].toString(), plainAttrs)
+                        i++
+                    }
+                }
+                else -> {
+                    append(text[i].toString(), plainAttrs)
+                    i++
+                }
+            }
+        }
+    }
+
     override fun customizeCellRenderer(
         tree: JTree,
         value: Any?,
@@ -31,7 +77,7 @@ class BookmarkTreeCellRenderer : ColoredTreeCellRenderer() {
             append(nodeView.displayName, nameAttrs)
             val suffix = nodeView.suffix
             if (suffix.isNotBlank()) {
-                append(" $suffix", SimpleTextAttributes.GRAY_ATTRIBUTES)
+                appendMarkdownText(" $suffix", Color.GRAY)
             }
             val descriptionPreview = nodeView.descriptionPreview
             if (descriptionPreview.isNotBlank()) {

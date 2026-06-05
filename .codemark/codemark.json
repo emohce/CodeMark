@@ -1,30 +1,17 @@
 {
-    "root": {
-        "uuid": "root",
-        "name": "EzCodeMark",
-        "createdAt": 1776072316340,
-        "modifiedAt": 1776072316340,
-        "children": [
-            {
-                "type": "bookmark",
-                "uuid": "6945e45c-8f32-45f0-8724-12b455f6da92",
-                "name": "23333",
-                "createdAt": 1776074582801,
-                "modifiedAt": 1776074582801,
-                "filePath": "src/main/kotlin/emohce/data/repository/BookmarkRepositoryImpl.kt",
-                "line": 262,
-                "column": 41
-            },
-            {
-                "type": "bookmark",
-                "uuid": "d6d7503f-666d-43ab-9c0f-8e6e1819c189",
-                "name": "234",
-                "createdAt": 1776074531028,
-                "modifiedAt": 1776074531028,
-                "filePath": "src/main/kotlin/emohce/data/repository/BookmarkRepositoryImpl.kt",
-                "line": 255,
-                "column": 15
-            }
-        ]
-    }
+    "nodes": {
+        "root": {
+            "type": "group",
+            "uuid": "root",
+            "name": "EzCodeMark",
+            "createdAt": 1776072316340,
+            "modifiedAt": 1776072316340
+        }
+    },
+    "children": {
+        "root": []
+    },
+    "roots": [
+        "root"
+    ]
 }
