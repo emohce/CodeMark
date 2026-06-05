@@ -45,6 +45,9 @@ import emohce.presentation.toolwindow.TreeRefreshKind
 import emohce.presentation.toolwindow.panel.render.BookmarkTreeCellRenderer
 import emohce.presentation.toolwindow.panel.render.NodeIcons
 import emohce.presentation.toolwindow.panel.util.BookmarkTreeUtil
+import emohce.presentation.ui.ChipLabel
+import emohce.presentation.ui.DetailsPopupPanel
+import emohce.presentation.ui.RoundedPanel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -2826,32 +2829,6 @@ private open class RoundedPanel(
     }
 }
 
-private class DetailsPopupPanel(
-    private val accent: Color
-) : JPanel() {
-    init {
-        isOpaque = false
-    }
-
-    override fun paintComponent(g: Graphics) {
-        val g2 = g.create() as Graphics2D
-        try {
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            val bg = JBColor(0xF8FAFE, 0x1F2329)
-            val border = JBColor(0xCAD3E1, 0x3A414D)
-            g2.color = bg
-            g2.fillRoundRect(0, 0, width - 1, height - 1, 14, 14)
-            g2.color = accent
-            g2.fillRoundRect(0, 0, 5, height - 1, 14, 14)
-            g2.color = border
-            g2.drawRoundRect(0, 0, width - 1, height - 1, 14, 14)
-        } finally {
-            g2.dispose()
-        }
-        super.paintComponent(g)
-    }
-}
-
 private class IconBadge(
     icon: Icon,
     private val accent: Color
@@ -2874,34 +2851,6 @@ private class IconBadge(
             g2.fillRoundRect(0, 0, width - 1, height - 1, 10, 10)
             g2.color = Color(accent.red, accent.green, accent.blue, 120)
             g2.drawRoundRect(0, 0, width - 1, height - 1, 10, 10)
-        } finally {
-            g2.dispose()
-        }
-        super.paintComponent(g)
-    }
-}
-
-private class ChipLabel(
-    text: String,
-    private val accent: Color,
-    private val filled: Boolean = true
-) : JLabel(text) {
-    init {
-        font = font.deriveFont(Font.BOLD, (font.size - 1).coerceAtLeast(10).toFloat())
-        foreground = if (filled) accent else JBColor.GRAY
-        border = JBUI.Borders.empty(4, 8)
-        isOpaque = false
-    }
-
-    override fun paintComponent(g: Graphics) {
-        val g2 = g.create() as Graphics2D
-        try {
-            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-            val fillAlpha = if (filled) 34 else 0
-            g2.color = Color(accent.red, accent.green, accent.blue, fillAlpha)
-            g2.fillRoundRect(0, 0, width - 1, height - 1, 12, 12)
-            g2.color = Color(accent.red, accent.green, accent.blue, 92)
-            g2.drawRoundRect(0, 0, width - 1, height - 1, 12, 12)
         } finally {
             g2.dispose()
         }

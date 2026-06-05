@@ -53,6 +53,7 @@
 | file root | 多文件时顶层可见节点 |
 | 懒加载 | 未展开容器仅 `Loading...` 占位；展开时 `populateChildren` |
 | 单 file root | 子节点提升到 invisible root，无 file root 包装层 |
+| description 后缀 | Bookmark / Group 名称后展示 description 首个非空行；为空则不展示 |
 
 [`BookmarkTreeModelBuilder.kt`](../src/main/kotlin/emohce/presentation/toolwindow/panel/BookmarkTreeModelBuilder.kt)：
 
@@ -184,6 +185,19 @@ flowchart TD
 | Enter | 激活选中 |
 | 右键菜单 | **书签/笔记**：上一个书签、下一个书签、编辑、移动（全中文）；**组/流程等**：新建组、编辑、移动、删除、导航、刷新、定位当前；Group 时「展开所有嵌套子项」。右键弹出前与 ↑↓ 同步选中（不跳编辑器） |
 | 移动 | 树形弹窗 `BookmarkMoveTreePopup`：↑↓ 选行、←→ 前/内/后，Enter/确定；默认书签在选定节点之后、组在父容器内末尾 |
+| F1 详情 | `ShowCodemarkDetailsAction`：树焦点/SpeedSearch 同窗口时展示悬停节点详情，悬停为空则展示选中节点详情；新弹窗打开前关闭旧弹窗 |
+
+### 5.1 详情弹窗
+
+| 项 | 行为 |
+|----|------|
+| 触发 | 默认 `F1`，Action 可在 IDE Keymap 中改绑 |
+| 选点 | hover path 优先，其次 selection path |
+| 搜索态 | SpeedSearch 输入期间同样可触发，不关闭搜索前缀 |
+| 内容 | 节点类型、引用标记、项目相对文件位置、完整 description |
+| Markdown | description 渲染为 Markdown；普通换行保留为换行 |
+| 链接 | 项目相对路径基于 project root 解析；支持 `path`、`path:line`、`path:line:column`、`path#Lline` |
+| 导航 | 相对链接打开 IDE 文件并跳转行列；`http`/`https` 使用浏览器 |
 
 ---
 
@@ -240,6 +254,7 @@ flowchart TD
 | 展开状态 | `BookmarkViewModel`、`applyExpandedIdsToTree` |
 | 拖拽 | `BookmarkTreeDnDHandler.kt`、`BookmarkTreeDropSupport.kt` |
 | 渲染 | `BookmarkTreeCellRenderer.kt` |
+| 详情弹窗 | `ShowCodemarkDetailsAction.kt`、`BookmarkPanel.showCurrentNodeDetails` |
 | 外部选中 | `SelectionBus`、`expandToNodeByDomainPath` |
 | 全局导航 | `GlobalCodemarkNavigationUseCase`、`CodemarkNavigationHelper` |
 
@@ -269,11 +284,14 @@ flowchart TD
 - [ ] 搜索期折叠后改前缀仍保持折叠
 - [ ] ESC 后展开状态与非搜索共用
 - [ ] 搜索 ↑↓ 定位展开的祖先在退出搜索后**回收**；搜索期手动展开/折叠退出后**保留**
+- [ ] 搜索期按 `F1` 可展示当前悬停/选中节点详情，不清搜索前缀
 
 **联动与回归**
 
 - [ ] Gutter 深节点展开选中, 不能自动折叠
 - [ ] tree鼠标左键点击书签节点, 自动打开editor对应位置
+- [ ] Bookmark/Group 节点后缀展示 description 首个非空行；description 多行内容在详情弹窗中保持换行
+- [ ] 详情弹窗同一时间仅存在一个；相对 Markdown 链接能按项目根目录跳转文件和行号
 - [ ] 全局 Prev/Next、Alt+↑↓（仅排序）、DnD、右键、工具栏
 
 ### 10.2 自动化
@@ -309,6 +327,7 @@ flowchart TD
 | 2026-06-04 | Group 右键「展开所有嵌套子项」：`collectNestedContainerIds` + `ExpandNodes` |
 | 2026-06-04 | 右键同步 ↑↓ 选中；书签精简中文菜单；移动改为树形弹窗 |
 | 2026-06-05 | 搜索高亮一致性：`BookmarkIndexService.matchingNodeIdsForSearch` 改为基于 `name` 匹配，与 TreeSpeedSearch 高亮逻辑一致；`searchNavigationStopIds` 优先添加所有直接匹配节点；`isVerticalNavigationRow` 允许未展开 group 作为导航目标 |
+| 2026-06-05 | Tree-view 增加 Bookmark/Group description 首行后缀；`F1` 详情弹窗支持搜索态、Markdown 渲染、项目相对链接跳转与单例弹窗 |
 
 ---
 

@@ -21,6 +21,7 @@ A structured bookmark and navigation plugin for IntelliJ IDEA, providing tool wi
 - **Reference Management**: Inter-node references with circular dependency detection
 - **Process Navigation**: Previous/Next step navigation within process nodes
 - **Visual Enhancement**: Gutter icons, line-end inlay hints, and code highlighting
+- **Detail Notes**: Tree nodes show the first description line as a suffix; `F1` opens a Markdown detail popup
 - **Performance Optimization**: Index service, incremental updates, and lazy loading
 
 ## Requirements
@@ -63,14 +64,21 @@ cd CodeRemarkTour
   - `Shift+F2` - Add bookmark
   - `Shift+F3` - Add group
   - `Shift+F4` - Add note
+  - `F1` - Show details for the hovered/selected tree node
+  - `Shift+F1` - Show floating details for the CodeMark at the current caret line
   - `Alt+Shift+↓` - Next bookmark
   - `Alt+Shift+↑` - Previous bookmark
   - `Shift+Delete` - Delete current line bookmark
 
 #### Tool Window Operations
-- **Tree View**: Support drag-and-drop moving, right-click menu, search filtering
+- **Tree View**: Support drag-and-drop moving, right-click menu, search highlighting, and first-line description suffixes for Bookmark/Group nodes
+- **Detail Popup**: Press `F1` while the tree or search is active to show the full description of the hovered/selected node
+- **Markdown Details**: Descriptions render as Markdown, and project-relative links can jump to files and line numbers
 - **Process Navigation**: Previous/Next buttons for process nodes
 - **Search Function**: Top search bar supports name and description search
+
+#### Editing Experience
+- **Detached Editor**: Press `F2` in Description/Markdown fields when editing a bookmark or note to open an extra editor dialog
 
 #### Editor Integration
 - **Gutter Icons**: Left-click selects tree node, right-click shows operation menu

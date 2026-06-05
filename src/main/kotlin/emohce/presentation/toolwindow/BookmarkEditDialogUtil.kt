@@ -15,6 +15,7 @@ import com.intellij.util.ui.FormBuilder
 import emohce.domain.model.BookmarkNode
 import java.awt.GridLayout
 import java.awt.event.ActionEvent
+import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.io.File
 import java.nio.file.Path
@@ -71,14 +72,7 @@ object BookmarkEditDialogUtil {
             override fun documentChanged(event: DocumentEvent) = updateDescHeight()
         })
 
-        // Register F2 key using InputMap/ActionMap
-        val f2Action = object : AbstractAction() {
-            override fun actionPerformed(e: ActionEvent) {
-                openEditorInDialog(project, descField, "Edit Description")
-            }
-        }
-        descField.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0), "f2")
-        descField.actionMap.put("f2", f2Action)
+        installOpenEditorShortcut(project, descField, "Edit Description")
 
         val fields = listOf(nameField, descField, lineField, columnField, pathField)
         setupCommandNumberNavigation(fields)
@@ -112,6 +106,7 @@ object BookmarkEditDialogUtil {
         val fields = listOf(nameField, descField, markdownField)
         setupCommandNumberNavigation(fields)
         setupEditorTextFieldNavigation(markdownField, fields, 2)
+        installOpenEditorShortcut(project, markdownField, "Edit Markdown")
 
         val result = showPanelOkCancelWithEditor(project, panel, "Edit Description", nameField, markdownField)
         if (!result) return null
@@ -212,12 +207,11 @@ object BookmarkEditDialogUtil {
         val document = editorField.document
         val editor = EditorFactory.getInstance().createEditor(document, project)
         val editorComponent = editor.component
+        editor.caretModel.moveToOffset(0)
         
         val dialog = object : DialogWrapper(project) {
             init {
                 this.title = title
-                setOKActionEnabled(false)
-                setCancelButtonText("")
                 init()
             }
 
@@ -227,6 +221,10 @@ object BookmarkEditDialogUtil {
                 panel.preferredSize = java.awt.Dimension(600, 400)
                 return panel
             }
+
+            override fun getPreferredFocusedComponent(): JComponent = editor.contentComponent
+
+            override fun createActions(): Array<javax.swing.Action> = emptyArray()
 
             override fun doCancelAction() {
                 // ESC closes the dialog, content is already synced
@@ -240,6 +238,51 @@ object BookmarkEditDialogUtil {
         }
         
         dialog.show()
+        javax.swing.SwingUtilities.invokeLater {
+            editor.caretModel.moveToOffset(0)
+            editor.scrollingModel.scrollToCaret(com.intellij.openapi.editor.ScrollType.CENTER_UP)
+            editor.contentComponent.requestFocusInWindow()
+        }
+    }
+
+    private fun installOpenEditorShortcut(project: Project, editorField: EditorTextField, title: String) {
+        val action = object : AbstractAction() {
+            override fun actionPerformed(e: ActionEvent) {
+                openEditorInDialog(project, editorField, title)
+            }
+        }
+
+        fun bind(component: JComponent) {
+            component.getInputMap(JComponent.WHEN_FOCUSED).put(KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0), "openEditorDialog")
+            component.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0), "openEditorDialog")
+            component.actionMap.put("openEditorDialog", action)
+        }
+
+        fun bindEditorComponents() {
+            val editor = editorField.editor ?: return
+            bind(editor.component)
+            bind(editor.contentComponent)
+            if (editor.contentComponent.getClientProperty("ezcodemarks.openEditorF2") == true) return
+            editor.contentComponent.putClientProperty("ezcodemarks.openEditorF2", true)
+            editor.contentComponent.addKeyListener(object : KeyAdapter() {
+                override fun keyPressed(e: KeyEvent) {
+                    if (e.keyCode == KeyEvent.VK_F2 && e.modifiersEx == 0) {
+                        e.consume()
+                        openEditorInDialog(project, editorField, title)
+                    }
+                }
+            })
+        }
+
+        bind(editorField)
+        editorField.addFocusListener(object : java.awt.event.FocusAdapter() {
+            override fun focusGained(e: java.awt.event.FocusEvent) {
+                bindEditorComponents()
+            }
+        })
+        javax.swing.SwingUtilities.invokeLater {
+            bindEditorComponents()
+        }
     }
 
     private fun setupCommandNumberNavigation(fields: List<JComponent>) {

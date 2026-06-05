@@ -101,5 +101,12 @@
                 description="Show details for the hovered or selected CodeMark tree node">
             <keyboard-shortcut keymap="$default" first-keystroke="F1"/>
         </action>
+        <action id="EzCodeMarks.ShowCodemarkDetailsAtCaret"
+                class="emohce.presentation.action.ShowCodemarkDetailsAtCaretAction"
+                text="Show CodeMark Details at Caret"
+                description="Show details for the CodeMark at the current caret position">
+            <keyboard-shortcut keymap="$default" first-keystroke="shift F1"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>
