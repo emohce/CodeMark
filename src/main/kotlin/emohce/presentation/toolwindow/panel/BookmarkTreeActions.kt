@@ -1,5 +1,6 @@
 package emohce.presentation.toolwindow.panel
 
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.util.ui.JBUI
 import emohce.domain.model.BookmarkNode
 import java.awt.FlowLayout
@@ -126,29 +127,29 @@ internal class BookmarkTreeActions(
     }
 
     fun installShortcuts() {
+        val cmdOrCtrl = if (SystemInfo.isMac) KeyEvent.META_DOWN_MASK else KeyEvent.CTRL_DOWN_MASK
         bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_DELETE, 0), callbacks.deleteSelected)
-        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_G, KeyEvent.CTRL_DOWN_MASK), callbacks.createGroup)
+        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_G, cmdOrCtrl), callbacks.createGroup)
         bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_P, KeyEvent.ALT_DOWN_MASK), callbacks.createProcess)
-        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_B, KeyEvent.CTRL_DOWN_MASK), callbacks.createBookmark)
-        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_N, KeyEvent.CTRL_DOWN_MASK), callbacks.createDescriptive)
-        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_E, KeyEvent.CTRL_DOWN_MASK), callbacks.editSelected)
+        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_B, cmdOrCtrl), callbacks.createBookmark)
+        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_N, cmdOrCtrl), callbacks.createDescriptive)
+        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_E, cmdOrCtrl), callbacks.editSelected)
         bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_F2, 0), callbacks.editSelectedBookmarkOrGroup)
-        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_M, KeyEvent.CTRL_DOWN_MASK), callbacks.moveSelected)
-        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_T, KeyEvent.CTRL_DOWN_MASK), callbacks.addToProcess)
+        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_M, cmdOrCtrl), callbacks.moveSelected)
+        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_T, cmdOrCtrl), callbacks.addToProcess)
         bindShortcut(
-            KeyStroke.getKeyStroke(KeyEvent.VK_T, KeyEvent.CTRL_DOWN_MASK or KeyEvent.SHIFT_DOWN_MASK),
+            KeyStroke.getKeyStroke(KeyEvent.VK_T, cmdOrCtrl or KeyEvent.SHIFT_DOWN_MASK),
             callbacks.copyToProcess
         )
         bindShortcut(
-            KeyStroke.getKeyStroke(KeyEvent.VK_E, KeyEvent.CTRL_DOWN_MASK or KeyEvent.SHIFT_DOWN_MASK),
+            KeyStroke.getKeyStroke(KeyEvent.VK_E, cmdOrCtrl or KeyEvent.SHIFT_DOWN_MASK),
             callbacks.setProcessEntry
         )
-        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_R, KeyEvent.CTRL_DOWN_MASK), callbacks.refresh)
+        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_R, cmdOrCtrl), callbacks.refresh)
         bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_UP, KeyEvent.ALT_DOWN_MASK)) { callbacks.moveSibling(-1) }
         bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_DOWN, KeyEvent.ALT_DOWN_MASK)) { callbacks.moveSibling(1) }
         bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), callbacks.activateSelected)
-        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_F, KeyEvent.CTRL_DOWN_MASK), callbacks.toggleSearchMode)
-        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_F, KeyEvent.META_DOWN_MASK), callbacks.toggleSearchMode)
+        bindShortcut(KeyStroke.getKeyStroke(KeyEvent.VK_F, cmdOrCtrl), callbacks.toggleSearchMode)
     }
 
     private fun textButton(text: String, handler: () -> Unit, isEnabled: () -> Boolean = { true }): JButton {
