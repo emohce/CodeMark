@@ -21,6 +21,10 @@ import javax.swing.KeyStroke
 object BookmarkEditDialogUtil {
 
     fun editBookmark(project: Project, node: BookmarkNode.Bookmark): BookmarkNode.Bookmark? {
+        return editBookmark(project, node, "Edit Bookmark")
+    }
+
+    fun editBookmark(project: Project, node: BookmarkNode.Bookmark, title: String): BookmarkNode.Bookmark? {
         val nameField = JTextField(node.name)
         val descField = multilineTextArea(node.description, 3)
         val pathField = JTextField(bookmarkDisplayPath(node.filePath, project.basePath))
@@ -41,9 +45,9 @@ object BookmarkEditDialogUtil {
         setupCommandNumberNavigation(fields)
         setupTextAreaNavigation(descField, fields, 1)
 
-        if (!showPanelOkCancel(project, panel, "Edit Bookmark", nameField)) return null
+        if (!showPanelOkCancel(project, panel, title, nameField)) return null
         val path = bookmarkStoragePath(pathField.text.trim(), project.basePath)
-        if (!ensureFileExists(path, "Edit Bookmark")) return null
+        if (!ensureFileExists(path, title)) return null
         val line = (lineField.text.trim().toIntOrNull() ?: node.line).coerceAtLeast(0)
         val column = (columnField.text.trim().toIntOrNull() ?: node.column).coerceAtLeast(0)
         return node.copy(
@@ -151,6 +155,37 @@ object BookmarkEditDialogUtil {
 
     private fun setupCommandNumberNavigation(fields: List<JComponent>) {
         fields.forEachIndexed { index, field ->
+            // Disable default focus traversal for all fields
+            field.focusTraversalKeysEnabled = false
+
+            // For JTextField, move caret to start on focus gain instead of selecting all
+            if (field is JTextField) {
+                field.addFocusListener(object : java.awt.event.FocusAdapter() {
+                    override fun focusGained(e: java.awt.event.FocusEvent) {
+                        field.caretPosition = 0
+                        field.select(0, 0)
+                    }
+                })
+
+                // Add custom Tab navigation for JTextField
+                val nextField = if (index < fields.size - 1) fields[index + 1] else fields[0]
+                val prevField = if (index > 0) fields[index - 1] else fields[fields.size - 1]
+
+                field.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), "tabNext")
+                field.actionMap.put("tabNext", object : AbstractAction() {
+                    override fun actionPerformed(e: ActionEvent) {
+                        nextField.requestFocusInWindow()
+                    }
+                })
+
+                field.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, KeyEvent.SHIFT_DOWN_MASK), "tabPrev")
+                field.actionMap.put("tabPrev", object : AbstractAction() {
+                    override fun actionPerformed(e: ActionEvent) {
+                        prevField.requestFocusInWindow()
+                    }
+                })
+            }
+
             val action = object : AbstractAction() {
                 override fun actionPerformed(e: ActionEvent) {
                     field.requestFocusInWindow()
@@ -165,6 +200,16 @@ object BookmarkEditDialogUtil {
     private fun setupTextAreaNavigation(textArea: JTextArea, fields: List<JComponent>, fieldIndex: Int) {
         val nextField = if (fieldIndex < fields.size - 1) fields[fieldIndex + 1] else fields[0]
         val prevField = if (fieldIndex > 0) fields[fieldIndex - 1] else fields[fields.size - 1]
+
+        // Disable default focus traversal to allow custom Tab handling
+        textArea.focusTraversalKeysEnabled = false
+
+        // Move caret to start on focus gain instead of selecting all
+        textArea.addFocusListener(object : java.awt.event.FocusAdapter() {
+            override fun focusGained(e: java.awt.event.FocusEvent) {
+                textArea.caretPosition = 0
+            }
+        })
 
         // Tab: navigate to next field
         textArea.inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), "tabNext")

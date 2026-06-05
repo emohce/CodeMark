@@ -332,6 +332,7 @@ class BookmarkPanel(
                     SelectionBus.getInstance(project).setLastSelectedNodeId(req.nodeId)
                     renderer.highlightNodeId = req.nodeId
                     tree.repaint()
+                    if (req.focusTree) tree.requestFocusInWindow()
                     return@onEach
                 }
                 if (selectNodeById(req.nodeId)) {
@@ -339,6 +340,7 @@ class BookmarkPanel(
                     SelectionBus.getInstance(project).setLastSelectedNodeId(req.nodeId)
                     renderer.highlightNodeId = req.nodeId
                     highlightSelectedRow()
+                    if (req.focusTree) tree.requestFocusInWindow()
                     return@onEach
                 }
                 val resolvedId = req.filePath?.let { path -> indexService.firstMatch(path, req.line)?.nodeId }
@@ -348,6 +350,7 @@ class BookmarkPanel(
                         SelectionBus.getInstance(project).setLastSelectedNodeId(resolvedId)
                         renderer.highlightNodeId = resolvedId
                         tree.repaint()
+                        if (req.focusTree) tree.requestFocusInWindow()
                         return@onEach
                     }
                 }
@@ -356,6 +359,7 @@ class BookmarkPanel(
                         SelectionBus.getInstance(project).setLastSelectedNodeId(id)
                         renderer.highlightNodeId = id
                         tree.repaint()
+                        if (req.focusTree) tree.requestFocusInWindow()
                     }
                     return@onEach
                 }
@@ -371,6 +375,7 @@ class BookmarkPanel(
                         } else {
                             selectNodeWithRetry(req.nodeId)
                         }
+                        if (req.focusTree) tree.requestFocusInWindow()
                     } finally {
                         isSelectingFromSideEffect = false
                     }
@@ -1958,9 +1963,10 @@ class BookmarkPanel(
             else -> "Delete selected node?"
         }
         val confirmed = Messages.showYesNoDialog(
-            project,
             warning,
             "Delete",
+            "Yes",
+            "No",
             Messages.getQuestionIcon()
         )
         if (confirmed == Messages.YES) {
@@ -2197,15 +2203,11 @@ class BookmarkPanel(
         }
 
         private fun buildTooltip(): String {
-            val parts = mutableListOf<String>()
-            parts.add(pathLabel)
             if (node is BookmarkNode.Bookmark) {
                 val relativePath = toRelativePath(project, node.filePath) ?: node.filePath
-                parts.add("$relativePath:${node.line + 1}")
+                return "$relativePath:${node.line + 1}"
             }
-            if (referenceCount > 0) parts.add("refs: $referenceCount")
-            if (isReferencedTarget) parts.add("referenced")
-            return parts.joinToString(" | ")
+            return ""
         }
 
         override fun toString(): String {

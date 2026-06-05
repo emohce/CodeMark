@@ -330,7 +330,7 @@ class BookmarkHighlighterService(private val project: Project) {
                         toolWindowManager.getToolWindow("EzCodeMarks")?.show(null)
                         CodemarkNavigationHelper.navigateToEntry(project, entry.filePath, line, 0)
                         com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater {
-                            selectionBus.requestSelect(entry.nodeId, entry.filePath, line)
+                            selectionBus.requestSelect(entry.nodeId, entry.filePath, line, focusTree = false)
                             flashLine(editor, line)
                         }
                     }

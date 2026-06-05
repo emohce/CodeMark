@@ -87,5 +87,13 @@
             <keyboard-shortcut keymap="$default" first-keystroke="shift DELETE"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action id="EzCodeMarks.SelectCodemarkInTree"
+                class="emohce.presentation.action.SelectCodemarkInTreeAction"
+                text="Select CodeMark in Tree"
+                description="Select codemark in tree-view from current line">
+            <keyboard-shortcut keymap="$default" first-keystroke="control shift F2"/>
+            <keyboard-shortcut keymap="macOS" first-keystroke="meta shift F2"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

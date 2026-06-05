@@ -66,7 +66,8 @@ class CreateBookmarkAtCaretAction : AnAction() {
                 filePath = file.path,
                 line = line,
                 column = column
-            )
+            ),
+            "Add Bookmark"
         ) ?: return logger.debug("[ACTION_CREATE_BOOKMARK] User cancelled create dialog")
         if (bookmark.name.isBlank()) return logger.warn("[ACTION_CREATE_BOOKMARK] Name is blank")
         logger.debug("[ACTION_CREATE_BOOKMARK] Bookmark created with uuid=${bookmark.uuid}")

@@ -98,6 +98,8 @@ internal class BookmarkTreeActions(
         menu.addSeparator()
         menu.add(actionItem("编辑", callbacks.editSelected))
         menu.add(actionItem("移动", callbacks.moveSelected))
+        menu.addSeparator()
+        menu.add(actionItem("删除", callbacks.deleteSelected))
     }
 
     private fun buildFullMenu(menu: JPopupMenu) {
