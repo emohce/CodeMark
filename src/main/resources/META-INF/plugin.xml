@@ -36,6 +36,11 @@
             anchor="right"
             secondary="false"/>
         <postStartupActivity implementation="emohce.core.startup.BookmarkStartupActivity"/>
+        <applicationConfigurable
+            parentId="tools"
+            instance="emohce.presentation.settings.EzCodeMarksSettingsConfigurable"
+            id="emohce.settings"
+            displayName="EzCodeMarks"/>
     </extensions>
 
     <actions>
@@ -106,6 +111,13 @@
                 text="Show CodeMark Details at Caret"
                 description="Show details for the CodeMark at the current caret position">
             <keyboard-shortcut keymap="$default" first-keystroke="shift F1"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+        <action id="EzCodeMarks.CopySelectionReference"
+                class="emohce.presentation.action.CopySelectionReferenceAction"
+                text="Copy Selection Reference"
+                description="Copy the selected code range as @FileName#Lstart-end">
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift C"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
     </actions>

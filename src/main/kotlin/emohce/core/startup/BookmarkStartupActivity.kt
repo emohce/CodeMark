@@ -2,6 +2,7 @@ package emohce.core.startup
 
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.startup.ProjectActivity
+import emohce.presentation.editor.SelectionReferenceHintService
 import emohce.presentation.editor.highlighter.BookmarkHighlighterService
 
 /**
@@ -11,5 +12,6 @@ class BookmarkStartupActivity : ProjectActivity {
     override suspend fun execute(project: Project) {
         if (project.isDisposed) return
         BookmarkHighlighterService.getInstance(project).start()
+        SelectionReferenceHintService.getInstance(project).start()
     }
 }

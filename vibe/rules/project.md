@@ -19,6 +19,7 @@ Tool: codex
 - Before implementation, inspect the relevant source paths and existing docs for the current task.
 - For UI work, follow project style first, then CodeNote UI rules.
 - For security, data, release, or permission work, apply CodeNote high-risk gates.
+- Disable Serena for all project work: do not call Serena tools, read/write Serena memories, or use `.serena/` as context. Use normal file inspection and project-approved commands instead.
 
 ## High-Risk Areas
 
