@@ -120,5 +120,18 @@
             <keyboard-shortcut keymap="$default" first-keystroke="alt shift C"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action id="EzCodeMarks.CopyFilePathFromCommit"
+                class="emohce.presentation.action.CopyFilePathFromCommitAction"
+                text="Copy File Path from Project Root"
+                description="Copy the full file path from project root including file name and extension">
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift C"/>
+            <keyboard-shortcut keymap="macOS" first-keystroke="alt shift C"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="after" relative-to-action="CutCopyPasteGroup"/>
+            <add-to-group group-id="CopyReferencePopupGroup" anchor="last"/>
+            <add-to-group group-id="SolutionExplorerPopupMenu" anchor="after" relative-to-action="CopyReferencePopupGroup"/>
+            <add-to-group group-id="ChangesViewPopupMenu" anchor="last"/>
+            <add-to-group group-id="Git.Stage.Tree.Menu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

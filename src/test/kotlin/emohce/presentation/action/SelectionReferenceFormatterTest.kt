@@ -49,6 +49,18 @@ class SelectionReferenceFormatterTest {
     }
 
     @Test
+    fun `falls back to file name when commit tree path is outside project roots`() {
+        assertEquals(
+            "external.txt",
+            selectionReferenceTarget(
+                projectBasePaths = listOf("/Users/gdkmjd/work/czz/EzCodeMark"),
+                filePath = "/tmp/external.txt",
+                fileName = "external.txt"
+            )
+        )
+    }
+
+    @Test
     fun `includes project root name for root level file`() {
         assertEquals(
             "EzCodeMark/AGENTS.md",
