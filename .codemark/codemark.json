@@ -6,10 +6,32 @@
             "name": "EzCodeMark",
             "createdAt": 1776072316340,
             "modifiedAt": 1776072316340
+        },
+        "d2dc522e-abd1-495f-b1ec-5247ef88e6ec": {
+            "type": "bookmark",
+            "uuid": "d2dc522e-abd1-495f-b1ec-5247ef88e6ec",
+            "name": "3.1",
+            "createdAt": 1780641201123,
+            "modifiedAt": 1780641201123,
+            "filePath": "src/main/kotlin/emohce/data/repository/BookmarkStore.kt",
+            "line": 190
+        },
+        "8ffe5873-69fa-4a3d-a0dc-c86cd56e06b6": {
+            "type": "bookmark",
+            "uuid": "8ffe5873-69fa-4a3d-a0dc-c86cd56e06b6",
+            "name": "3.2",
+            "createdAt": 1780641214811,
+            "modifiedAt": 1780641214811,
+            "filePath": "src/main/kotlin/emohce/data/repository/BookmarkStore.kt",
+            "line": 193,
+            "column": 16
         }
     },
     "children": {
-        "root": []
+        "root": [
+            "d2dc522e-abd1-495f-b1ec-5247ef88e6ec",
+            "8ffe5873-69fa-4a3d-a0dc-c86cd56e06b6"
+        ]
     },
     "roots": [
         "root"

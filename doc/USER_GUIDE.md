@@ -132,10 +132,10 @@ Markdown 链接支持基于项目根目录解析：
 
 | 写法 | 行为 |
 |------|------|
-| `[文档](doc/USER_GUIDE.md)` | 打开项目内相对文件 |
-| `[指定行](doc/USER_GUIDE.md:12)` | 打开文件并跳转到第 12 行 |
-| `[指定列](src/main/kotlin/App.kt:7:3)` | 打开文件并跳转到第 7 行第 3 列 |
-| `[GitHub 行号](README.md#L5)` | 打开文件并跳转到第 5 行 |
+| `[文档](USER_GUIDE.md)` | 打开项目内相对文件 |
+| `[指定行](USER_GUIDE.md:12)` | 打开文件并跳转到第 12 行 |
+| `[指定列](../src/main/kotlin/emohce/core/startup/BookmarkStartupActivity.kt:7:3)` | 打开文件并跳转到第 7 行第 3 列 |
+| `[GitHub 行号](../README.md#L5)` | 打开文件并跳转到第 5 行 |
 | `[官网](https://example.com)` | 用浏览器打开外部链接 |
 
 ### 工具栏按钮

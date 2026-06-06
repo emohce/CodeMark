@@ -106,4 +106,4 @@
 
 - 代码类改动：优先用项目现有 Gradle 任务（`runIde` / 测试）验证；无法运行时说明原因与最小手工验证路径。
 - 文档类改动：运行
-  `python3 vibe/scripts/eval_vibeai.py --rules vibe/ai-rules/VibeAi_Scoring_Rules.yaml --inputs vibe/evals --output-json vibe/evals/vibeai-report.json`。
+  `python3 vibe/scripts/eval_vibeai.py --rules vibe/evals/README.md --inputs vibe/evals --output-json vibe/evals/vibeai-report.json`。

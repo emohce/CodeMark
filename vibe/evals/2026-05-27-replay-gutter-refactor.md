@@ -5,7 +5,7 @@
 - 任务ID：replay-gutter-refactor
 - 任务类型：规则回放 / IntelliJ插件 / gutter
 - 执行人/Agent：codex
-- 关联规则版本：VibeAi_2026
+- 关联规则版本：legacy master rule
 
 ## 2. 质量指标打分
 - 一次通过率：100%

@@ -80,7 +80,7 @@ cd CodeRemarkTour
 #### Editing Experience
 - **Detached Editor**: Press `F2` in Description/Markdown fields when editing a bookmark or note to open an extra editor dialog
 
-#### Editor Integration
+#### Editor Integration Architecture
 - **Gutter Icons**: Left-click selects tree node, right-click shows operation menu
 - **Line-end Hints**: Display node information, click to navigate
 - **Bidirectional Selection**: Tool window selection syncs with editor position

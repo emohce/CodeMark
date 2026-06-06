@@ -229,7 +229,7 @@ flowchart TD
 | **全局 Prev/Next** | 菜单、Gutter、plugin **Alt+Shift+↑/↓** | 全树可导航书签 | 否 |
 | **Process 内 Prev/Next** | Intent 已实现 | 当前 Process 内链 | 否；**尚无**树快捷键绑定 |
 
-> **注意**：Alt+↑↓ **不是** Process 内导航。与 [260206-操作入口与快捷键汇总.md](./260206-操作入口与快捷键汇总.md) 中「流程内上一项」描述不一致时，**以本文档与代码为准**。
+> **注意**：Alt+↑↓ **不是** Process 内导航。与 [260206-操作入口与快捷键汇总.md](archive/260206-操作入口与快捷键汇总.md) 中「流程内上一项」描述不一致时，**以本文档与代码为准**。
 
 ---
 
@@ -336,5 +336,5 @@ flowchart TD
 | 文档 | 说明 |
 |------|------|
 | [260604-cursor-tree-navigation-fix.md](./260604-cursor-tree-navigation-fix.md) | 补丁级变更摘要（不重复验收） |
-| [260206-操作入口与快捷键汇总.md](./260206-操作入口与快捷键汇总.md) | 全插件入口；树搜索/Alt+↑↓ 以本文档为准 |
+| [260206-操作入口与快捷键汇总.md](archive/260206-操作入口与快捷键汇总.md) | 全插件入口；树搜索/Alt+↑↓ 以本文档为准 |
 | [plugin.xml](../src/main/resources/META-INF/plugin.xml) | 全局 Action 默认键 |

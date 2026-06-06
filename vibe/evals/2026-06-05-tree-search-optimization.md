@@ -5,7 +5,7 @@
 - 任务ID：tree-search-optimization
 - 任务类型：L2 / IntelliJ 插件 / toolwindow
 - 执行人/Agent：Cascade
-- 关联规则版本：VibeAi_2026
+- 关联规则版本：legacy master rule
 
 ## 2. 质量指标打分
 - 一次通过率：100%

@@ -1,48 +1,14 @@
-# VibeAi Task Eval Template
+# Legacy Rule Redirect: VibeAi_Task_Eval_Template
 
-## 1. 基本信息
-- 日期：
-- 任务ID：
-- 任务类型：
-- 执行人/Agent：
-- 关联规则版本：
+Status: migrated legacy rule.
 
-## 2. 质量指标打分
-- 一次通过率：
-- 回退率：
-- 额外沟通轮次：
-- 高风险动作确认率：
-- 可复用经验条数：
+This file is retained only for historical compatibility. Do not use it as an active instruction source.
 
-## 3. 工具调用门禁
-- 是否完成必要性检查：是 / 否
-- 是否完成最小权限检查：是 / 否
-- 是否完成可回滚性检查：是 / 否
-- 不满足项与原因：
+Current authoritative rules:
 
-## 4. 失败恢复记录
-- 是否发生重试：是 / 否
-- 重试次数：
-- 退避间隔：
-- 第二次失败后是否切换路径：是 / 否
-- 是否进入 blocked：是 / 否
-- 阻塞点：
+- [Project rule index](../rules/README.md)
+- [Project constraints](../rules/project.md)
+- [Workflow rules](../rules/workflow.md)
+- [Knowledge routing](../rules/knowledge.md)
 
-## 5. 记忆写入评分（0-10）
-- 复用价值（0-2）：
-- 执行价值（0-2）：
-- 证据强度（0-2）：
-- 时效稳定性（0-2）：
-- 安全合规（0-2）：
-- 总分：
-- 是否写入长期记忆（>=7）：是 / 否
-
-## 6. 回放评估（规则变更时必填）
-- 历史任务回放样本数：
-- 自动判定项通过率：
-- 人工评审结论：
-
-## 7. 结论与动作
-- 本次主要收益：
-- 本次主要问题：
-- 规则更新建议：
+Reusable project-specific constraints from the old rule set have been merged into the current rule files.
