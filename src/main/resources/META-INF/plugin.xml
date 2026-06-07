@@ -44,91 +44,93 @@
     </extensions>
 
     <actions>
-        <action id="EzCodeMarks.CreateBookmarkAtCaret"
-                class="emohce.presentation.action.CreateBookmarkAtCaretAction"
-                text="Add CodeMark Here"
-                description="Create a codemark at the current caret">
-            <keyboard-shortcut keymap="$default" first-keystroke="shift F2"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action id="EzCodeMarks.CreateProcessAtCaret"
-                class="emohce.presentation.action.CreateProcessAtCaretAction"
-                text="Add Process Entry Here"
-                description="Create a process with entry at the current caret">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action id="EzCodeMarks.CreateGroupAtCaret"
-                class="emohce.presentation.action.CreateGroupAtCaretAction"
-                text="Add Group Here"
-                description="Create a group under the current selection">
-            <keyboard-shortcut keymap="$default" first-keystroke="shift F3"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action id="EzCodeMarks.CreateNoteAtCaret"
-                class="emohce.presentation.action.CreateNoteAtCaretAction"
-                text="Add Note Here"
-                description="Create a note under the current selection">
-            <keyboard-shortcut keymap="$default" first-keystroke="shift F4"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action id="EzCodeMarks.NextCodemark"
-                class="emohce.presentation.action.NextCodemarkAction"
-                text="Next CodeMark"
-                description="Go to next CodeMark in tree order">
-            <keyboard-shortcut keymap="$default" first-keystroke="alt shift DOWN"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action id="EzCodeMarks.PrevCodemark"
-                class="emohce.presentation.action.PrevCodemarkAction"
-                text="Prev CodeMark"
-                description="Go to previous CodeMark in tree order">
-            <keyboard-shortcut keymap="$default" first-keystroke="alt shift UP"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action id="EzCodeMarks.DeleteCodeMarkAtCaret"
-                class="emohce.presentation.action.DeleteCodeMarkAtCaretAction"
-                text="Delete CodeMark"
-                description="Delete CodeMark at current line">
-            <keyboard-shortcut keymap="$default" first-keystroke="shift DELETE"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action id="EzCodeMarks.SelectCodemarkInTree"
-                class="emohce.presentation.action.SelectCodemarkInTreeAction"
-                text="Select CodeMark in Tree"
-                description="Select codemark in tree-view from current line">
-            <keyboard-shortcut keymap="$default" first-keystroke="control shift F2"/>
-            <keyboard-shortcut keymap="macOS" first-keystroke="meta shift F2"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
+        <group id="EzCodeMarks.EditorPopupMenuGroup" text="CodeMarks" description="CodeMark actions" popup="true">
+            <action id="EzCodeMarks.CreateBookmarkAtCaret"
+                    class="emohce.presentation.action.CreateBookmarkAtCaretAction"
+                    text="Add CodeMark Here"
+                    description="Create a codemark at the current caret">
+                <keyboard-shortcut keymap="$default" first-keystroke="shift F2"/>
+            </action>
+            <action id="EzCodeMarks.CreateProcessAtCaret"
+                    class="emohce.presentation.action.CreateProcessAtCaretAction"
+                    text="Add Process Entry Here"
+                    description="Create a process with entry at the current caret">
+            </action>
+            <action id="EzCodeMarks.CreateGroupAtCaret"
+                    class="emohce.presentation.action.CreateGroupAtCaretAction"
+                    text="Add Group Here"
+                    description="Create a group under the current selection">
+                <keyboard-shortcut keymap="$default" first-keystroke="shift F3"/>
+            </action>
+            <action id="EzCodeMarks.CreateNoteAtCaret"
+                    class="emohce.presentation.action.CreateNoteAtCaretAction"
+                    text="Add Note Here"
+                    description="Create a note under the current selection">
+                <keyboard-shortcut keymap="$default" first-keystroke="shift F4"/>
+            </action>
+            <separator/>
+            <action id="EzCodeMarks.NextCodemark"
+                    class="emohce.presentation.action.NextCodemarkAction"
+                    text="Next CodeMark"
+                    description="Go to next CodeMark in tree order">
+                <keyboard-shortcut keymap="$default" first-keystroke="alt shift DOWN"/>
+            </action>
+            <action id="EzCodeMarks.PrevCodemark"
+                    class="emohce.presentation.action.PrevCodemarkAction"
+                    text="Prev CodeMark"
+                    description="Go to previous CodeMark in tree order">
+                <keyboard-shortcut keymap="$default" first-keystroke="alt shift UP"/>
+            </action>
+            <action id="EzCodeMarks.DeleteCodeMarkAtCaret"
+                    class="emohce.presentation.action.DeleteCodeMarkAtCaretAction"
+                    text="Delete CodeMark"
+                    description="Delete CodeMark at current line">
+                <keyboard-shortcut keymap="$default" first-keystroke="shift DELETE"/>
+            </action>
+            <separator/>
+            <action id="EzCodeMarks.SelectCodemarkInTree"
+                    class="emohce.presentation.action.SelectCodemarkInTreeAction"
+                    text="Select CodeMark in Tree"
+                    description="Select codemark in tree-view from current line">
+                <keyboard-shortcut keymap="$default" first-keystroke="control shift F2"/>
+                <keyboard-shortcut keymap="macOS" first-keystroke="meta shift F2"/>
+            </action>
+            <action id="EzCodeMarks.ShowCodemarkDetailsAtCaret"
+                    class="emohce.presentation.action.ShowCodemarkDetailsAtCaretAction"
+                    text="Show CodeMark Details at Caret"
+                    description="Show details for the CodeMark at the current caret position">
+                <keyboard-shortcut keymap="$default" first-keystroke="shift F1"/>
+            </action>
+            <separator/>
+            <action id="EzCodeMarks.CopySelectionReference"
+                    class="emohce.presentation.action.CopySelectionReferenceAction"
+                    text="Copy Selection Reference"
+                    description="Copy the selected code range as @FileName#Lstart-end">
+                <keyboard-shortcut keymap="$default" first-keystroke="alt shift C"/>
+            </action>
+            <action id="EzCodeMarks.CopyFilePathFromCommit"
+                    class="emohce.presentation.action.CopyFilePathFromCommitAction"
+                    text="Copy File Path from Project Root"
+                    description="Copy the full file path from project root including file name and extension">
+                <keyboard-shortcut keymap="$default" first-keystroke="control alt shift C"/>
+                <keyboard-shortcut keymap="macOS" first-keystroke="meta alt shift C"/>
+            </action>
+            <add-to-group group-id="EditorPopupMenu" anchor="first"/>
+        </group>
         <action id="EzCodeMarks.ShowCodemarkDetails"
                 class="emohce.presentation.action.ShowCodemarkDetailsAction"
                 text="Show CodeMark Details"
                 description="Show details for the hovered or selected CodeMark tree node">
             <keyboard-shortcut keymap="$default" first-keystroke="F1"/>
         </action>
-        <action id="EzCodeMarks.ShowCodemarkDetailsAtCaret"
-                class="emohce.presentation.action.ShowCodemarkDetailsAtCaretAction"
-                text="Show CodeMark Details at Caret"
-                description="Show details for the CodeMark at the current caret position">
-            <keyboard-shortcut keymap="$default" first-keystroke="shift F1"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action id="EzCodeMarks.CopySelectionReference"
-                class="emohce.presentation.action.CopySelectionReferenceAction"
-                text="Copy Selection Reference"
-                description="Copy the selected code range as @FileName#Lstart-end">
-            <keyboard-shortcut keymap="$default" first-keystroke="alt shift C"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-        </action>
-        <action id="EzCodeMarks.CopyFilePathFromCommit"
+        <action id="EzCodeMarks.CopyFilePathFromCommit.ProjectView"
                 class="emohce.presentation.action.CopyFilePathFromCommitAction"
                 text="Copy File Path from Project Root"
                 description="Copy the full file path from project root including file name and extension">
             <keyboard-shortcut keymap="$default" first-keystroke="alt shift C"/>
-            <keyboard-shortcut keymap="macOS" first-keystroke="alt shift C"/>
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="after" relative-to-action="CutCopyPasteGroup"/>
             <add-to-group group-id="CopyReferencePopupGroup" anchor="last"/>
+            <add-to-group group-id="CopyFileReference" anchor="last"/>
             <add-to-group group-id="SolutionExplorerPopupMenu" anchor="after" relative-to-action="CopyReferencePopupGroup"/>
             <add-to-group group-id="ChangesViewPopupMenu" anchor="last"/>
             <add-to-group group-id="Git.Stage.Tree.Menu" anchor="last"/>
