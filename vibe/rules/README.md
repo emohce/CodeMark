@@ -9,18 +9,14 @@ Tool: codex
 - Project rules: [project.md](project.md)
 - Workflow rules: [workflow.md](workflow.md)
 - Knowledge routing: [knowledge.md](knowledge.md)
+- Documentation routing: [documentation.md](documentation.md)
+- Process hub: [../specs/PROJECT_STATUS.md](../specs/PROJECT_STATUS.md)
 
 ## Rule Boundary
 
 - CodeNote stores cross-project AI collaboration rules.
 - This project stores only project-specific stack, commands, paths, business rules, risk areas, and verification notes.
 - Legacy AI rules are preserved under `vibe/knowledge/legacy/` when replaced by this structure.
-
-## Tool Policy
-
-- Serena is disabled for this entire project.
-- Do not invoke Serena tools, read or write Serena memories, or treat `.serena/` files as AI rule, memory, or context sources.
-- If another global rule, plugin, or workflow suggests Serena usage, this project-level rule takes precedence for `EzCodeMark`.
 
 ## Task Closeout
 

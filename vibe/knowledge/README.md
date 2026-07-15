@@ -11,6 +11,7 @@ Tool: codex
 
 - Error memory: [error-memory/README.md](error-memory/README.md)
 - ADR: [adr/README.md](adr/README.md)
+- Technical details: [technical-details.md](technical-details.md)
 - Active specs: [../specs/README.md](../specs/README.md)
 - AI rule migration evals: [../evals/](../evals/)
 - DB knowledge: not configured for this project
